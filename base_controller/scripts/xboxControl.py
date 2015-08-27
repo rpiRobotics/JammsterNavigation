@@ -98,6 +98,12 @@ def base_controller():
             
         m1Duty = (yJoy * -250) + (xJoy * 250)
         m2Duty = (yJoy * -250) - (xJoy * 250)
+        #maintain bounds
+        if abs(m1Duty) > m1MaxDuty:
+            m1Duty = cmp(m1Duty, 0) * m1MaxDuty
+        if abs(m2Duty) > m2MaxDuty:
+            m2Duty = cmp(m2Duty, 0) * m2MaxDuty
+
         SetM1DutyAccel(400, int(m1Duty))
         SetM2DutyAccel(400, int(m2Duty))
         newData = False
