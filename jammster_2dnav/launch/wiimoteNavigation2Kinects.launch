@@ -1,0 +1,26 @@
+<!-- Entry point for using OpenNI devices -->
+<launch>
+
+  <node name="depthimage_to_laserscan1" pkg="depthimage_to_laserscan" type="depthimage_to_laserscan">
+    <remap from="image" to="/camera1/depth/image"/>
+    <remap from="scan" to="/scan1"/>
+    <param name="scan_height" type="int" value="100"/>
+    <param name="output_frame_id" type="str" value="camera1_depth_frame"/>
+  </node>   
+
+  <node name="depthimage_to_laserscan2" pkg="depthimage_to_laserscan" type="depthimage_to_laserscan">
+    <remap from="image" to="/camera2/depth/image"/>
+    <remap from="scan" to="/scan2"/>
+    <param name="scan_height" type="int" value="100"/>
+    <param name="output_frame_id" type="str" value="camera2_depth_frame"/>
+  </node>   
+
+  <node pkg="odometry" type="odometryPublisherMotionPlus2Kinects.py" name="odometryPublisher">
+    <remap from="/base_controller/odom" to="/odom"/>
+  </node>
+
+  <node pkg="base_controller" type="base_controller_forwardLookup.py" name="base_controller">
+    <remap from="/base_command" to="cmd_vel"/>
+  </node>
+
+</launch>
