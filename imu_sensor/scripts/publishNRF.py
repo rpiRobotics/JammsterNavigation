@@ -57,8 +57,9 @@ def talker():
         # construct messages to be sent
         buildImuMsg(myGateway.IMU1_read(), imu1Msg)
         buildImuMsg(myGateway.IMU2_read(), imu2Msg)
-        # flip z for the other imu to have them match
+        # flip axis for the other imu to have them match
         imu2Msg.angular_velocity.z *= -1
+        imu2Msg.linear_acceleration.x *= -1
         # publish messages
         imu1Pub.publish(imu1Msg)
         imu2Pub.publish(imu2Msg)
