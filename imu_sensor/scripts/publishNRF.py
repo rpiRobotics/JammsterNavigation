@@ -17,7 +17,7 @@ class NrfImuInterface(object):
         self._serial.write(dat)
         raw = self._serial.read(size = 14)
         unConverted = struct.unpack( "hhhhhhh", raw )
-        converted = [unConverted[0]/4096.0, unConverted[1]/4096.0,unConverted[2]/4096.0,unConverted[3]/131.0,unConverted[4]/131.0,unConverted[5]/131.0, unConverted[6]]
+        converted = [unConverted[0]/16384.0, unConverted[1]/16384.0,unConverted[2]/16384.0,unConverted[3]/131.0,unConverted[4]/131.0,unConverted[5]/131.0, unConverted[6]]
         return converted
 
     def IMU2_read(self):
@@ -57,6 +57,8 @@ def talker():
         # construct messages to be sent
         buildImuMsg(myGateway.IMU1_read(), imu1Msg)
         buildImuMsg(myGateway.IMU2_read(), imu2Msg)
+        # flip z for the other imu to have them match
+        imu2Msg.angular_velocity.z *= -1
         # publish messages
         imu1Pub.publish(imu1Msg)
         imu2Pub.publish(imu2Msg)
