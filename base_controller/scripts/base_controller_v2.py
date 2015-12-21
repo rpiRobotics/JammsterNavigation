@@ -16,7 +16,6 @@ import roboclaw
 #********************************#
 #              OBJECTS           #
 #********************************#
-port = serial.Serial("/dev/ttyACM0", baudrate=38400, timeout=.5)
 
 class MovingAverage:
     """
@@ -56,6 +55,8 @@ class RoboClaw:
         self.dutyMax = 5000
         
         self.address = 0x80
+        roboclawPort = '/dev/ttyACM0'
+        roboclaw.Open(roboclawPort,115200)
 
         
     def writeM1M2(self,m1Duty,m2Duty):
