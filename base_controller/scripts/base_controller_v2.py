@@ -7,6 +7,7 @@ Created on Mon Dec 21 10:46:10 2015
 """
 
 import rospy
+import math
 from sensor_msgs.msg import Imu
 from geometry_msgs.msg import Twist
 import serial
@@ -70,7 +71,7 @@ class RoboClaw:
         else:
             self.m2Duty = m2Duty
          
-#         print self.m1Duty,self.m2Duty
+#        print self.m1Duty,self.m2Duty
         roboclaw.DutyAccelM1(self.address,5000,self.m1Duty)
         roboclaw.DutyAccelM2(self.address,5000,self.m2Duty)
             
@@ -80,9 +81,9 @@ class BaseController:
     """
     def __init__(self):
         # Set PID structures to intial values
-        self.rightPID = PID( 10, 0, 0, 0, 0, 0, 0)
+        self.rightPID = PID(-100, 0, 0, 0, 0, 0, 0)
         self.rightPID.setPoint(0)
-        self.leftPID = PID( 10, 0, 0, 0, 0, 0, 0)
+        self.leftPID = PID( 100, 0, 0, 0, 0, 0, 0)
         self.leftPID.setPoint(0)
         
         self.somethingWentWrong = False
@@ -103,6 +104,7 @@ class BaseController:
         rospy.Subscriber("/cmd_vel",  Twist,  self.commandCallback)
         rospy.Subscriber("/imu1", Imu, self.imu1Callback)
         rospy.Subscriber("/imu2", Imu, self.imu2Callback)
+        time.sleep(1)
         
         self.lastDataTime = time.time()
         
@@ -133,8 +135,8 @@ class BaseController:
         # calculate desired velocities for wheels see Georgia Tech mobile robot 2.2 video for equation
         L=.57
         R=.9424
-        self.leftPID.setPoint( (2*linearV - angularV*L)/(2*R) )
-        self.rightPID.setPoint( (2*linearV + angularV*L)/(2*R) )
+        self.leftPID.setPoint( -(2*linearV - angularV*L)/(2*R))
+        self.rightPID.setPoint( -(2*linearV + angularV*L)/(2*R))
         
     def shutdown(self):
         """
@@ -164,7 +166,8 @@ class BaseController:
                 self.newData = True
                 
             if not self.newData:
-                if time.time() - self.lastDataTime > 1:
+                if time.time() - self.lastDataTime > .5:
+                    print "Too long between messages!"
                     self.shutdown()
                 else:
                     continue
@@ -191,15 +194,16 @@ class BaseController:
                 self.lastM1Measurement= self.currentM1Measurement
                 self.lastM2Measurement= self.currentM2Measurement           
                 
-                newLeft = newLeft + self.leftPID.update(self.currentLeftV.get())
-                newRight = newRight + self.rightPID.update(self.currentRightV.get())
+                newLeft = newLeft + int(self.leftPID.update(self.currentLeftV.get()))
+                newRight = newRight + int(self.rightPID.update(self.currentRightV.get()))
                 
                 #catch special case of not moving
                 if self.leftPID.getPoint() == 0 and self.rightPID.getPoint() == 0:
                     newLeft = 0
                     newRight = 0
-                
-                print("setpoint %f, measurement %f, update %f",self.leftPID.getPoint(),self.currentLeftV.get(),newLeft)
+                if abs(newLeft) > 0:                
+                    print("setpoint %f, measurement %f, update %f",self.leftPID.getPoint(),self.currentLeftV.get(),newLeft)
+                    print("setpoint %f, measurement %f, update %f",self.rightPID.getPoint(),self.currentRightV.get(),newRight)
                 self.myRoboclaw.writeM1M2(newLeft,newRight)
                 
             r.sleep()
@@ -213,5 +217,4 @@ def main():
     rospy.spin()
             
 if __name__ == '__main__':
-    time.sleep(5)
     main()
