@@ -4,6 +4,7 @@ import serial
 import struct
 import time
 import std_msgs.msg
+import math
 from sensor_msgs.msg import Imu 
 
 serial_port_name="/dev/ttyACM0"
@@ -39,9 +40,9 @@ def buildImuMsg(data, imuMsg):
     imuMsg.linear_acceleration.y = data[1]
     imuMsg.linear_acceleration.z = data[2]
 
-    imuMsg.angular_velocity.x = data[3]
-    imuMsg.angular_velocity.y = data[4]
-    imuMsg.angular_velocity.z = data[5]
+    imuMsg.angular_velocity.x = data[3] / 180 * math.pi
+    imuMsg.angular_velocity.y = data[4] / 180 * math.pi
+    imuMsg.angular_velocity.z = data[5] / 180 * math.pi
 
 # function to be spun, spits out data
 def talker():
