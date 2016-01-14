@@ -23,9 +23,8 @@ class JammsterModel:
         self.currentLeftRotationalPosition = 0
         self.currentRightRotationalPosition = 0
 
-        # make sure both imus have sent
-        self.rightWheelUpdated = False
-        self.leftWheelUpdated = False
+        # make sure an imu data has been sent
+        self.wheelUpdated = False
 
         # check this member variable to see if odometry information is send-able
         self.readyToPublish = False
@@ -38,7 +37,7 @@ class JammsterModel:
     def updateState(self):
 
         # dont update the odometry until both wiimotes have gotten an update
-        if not (self.leftWheelUpdated and self.rightWheelUpdated):
+        if not (self.wheelUpdated):
             return
 
         # set initial wheel angle
@@ -62,8 +61,7 @@ class JammsterModel:
 
     def published(self):
         self.readyToPublish = False
-        robot.leftWheelUpdated = False
-        robot.rightWheelUpdated = False
+        robot.wheelUpdated = False
 
 
 robot = JammsterModel()
@@ -73,19 +71,19 @@ def deltaAngle(x, y):
     return math.atan2(math.sin(x-y), math.cos(x-y))
 
 def wiimote1Callback(data):
-    robot.currentLeftRotationalPosition=math.atan2(data.linear_acceleration.x, data.linear_acceleration.z)
-    robot.leftWheelUpdated = True
+    robot.currentLeftRotationalPosition=math.atan2(data.linear_acceleration.x, data.linear_acceleration.y)
+    robot.wheelUpdated = True
 
 def wiimote2Callback(data):
-    robot.currentRightRotationalPosition=math.atan2(data.linear_acceleration.x, data.linear_acceleration.z)
-    robot.rightWheelUpdated = True
+    robot.currentRightRotationalPosition=math.atan2(data.linear_acceleration.x, data.linear_acceleration.y)
+    robot.wheelUpdated = True
 
 def listener():
 
     rospy.init_node('listener', anonymous=True)
 
-    rospy.Subscriber("/leftWheel/imu", Imu, wiimote1Callback)
-    rospy.Subscriber("/rightWheel/imu", Imu, wiimote2Callback)
+    rospy.Subscriber("/imu1", Imu, wiimote1Callback)
+    rospy.Subscriber("/imu2", Imu, wiimote2Callback)
 
     odomPub = rospy.Publisher("/base_controller/odom", Odometry)
 
@@ -100,7 +98,7 @@ def listener():
 
 	    quaternion = tf.transformations.quaternion_from_euler(0, 0, robot.theta)
             #tf msg
-            br.sendTransform((0, 0, 0), tf.transformations.quaternion_from_euler(0, 0, 0),rospy.Time.now(),"/odom", "/map")
+            #br.sendTransform((0, 0, 0), tf.transformations.quaternion_from_euler(0, 0, 0),rospy.Time.now(),"/odom", "/map")
             br.sendTransform((robot.x, robot.y, 0), tf.transformations.quaternion_from_euler(0, 0, robot.theta),rospy.Time.now(),"/base_link", "/odom")
             br.sendTransform((0, 0, .7), tf.transformations.quaternion_from_euler(0, 0, 0),rospy.Time.now(),"/base_laser_link", "/base_link")
             br.sendTransform((0, 0, 0), tf.transformations.quaternion_from_euler(0, 0, 0),rospy.Time.now(),"/camera_link", "/base_laser_link")

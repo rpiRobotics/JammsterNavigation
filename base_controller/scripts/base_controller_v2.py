@@ -56,7 +56,7 @@ class RoboClaw:
         self.dutyMax = 5000
         
         self.address = 0x80
-        roboclawPort = '/dev/ttyACM0'
+        roboclawPort = '/dev/ttyACM1'
         roboclaw.Open(roboclawPort,115200)
 
         
@@ -202,8 +202,8 @@ class BaseController:
                     newLeft = 0
                     newRight = 0
                 if abs(newLeft) > 0:                
-                    print("setpoint %f, measurement %f, update %f",self.leftPID.getPoint(),self.currentLeftV.get(),newLeft)
-                    print("setpoint %f, measurement %f, update %f",self.rightPID.getPoint(),self.currentRightV.get(),newRight)
+                    print "setpoint %3f, measurement %f, update %f",'%1.2f' % self.leftPID.getPoint(), '%1.2f' % self.currentLeftV.get(), '%1.2f' % newLeft
+                    print "setpoint %3f, measurement %f, update %f",'%1.2f' % self.rightPID.getPoint(), '%1.2f' % self.currentRightV.get(),'%1.2f' % newRight
                 self.myRoboclaw.writeM1M2(newLeft,newRight)
                 
             r.sleep()
