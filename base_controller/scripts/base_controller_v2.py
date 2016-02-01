@@ -5,7 +5,6 @@ Created on Mon Dec 21 10:46:10 2015
 
 @author: Andrew Cunningham
 """
-
 import rospy
 import math
 from sensor_msgs.msg import Imu
@@ -71,7 +70,7 @@ class RoboClaw:
         else:
             self.m2Duty = m2Duty
          
-#        print self.m1Duty,self.m2Duty
+        #print self.m1Duty,self.m2Duty
         roboclaw.DutyAccelM1(self.address,5000,self.m1Duty)
         roboclaw.DutyAccelM2(self.address,5000,self.m2Duty)
             
@@ -81,9 +80,9 @@ class BaseController:
     """
     def __init__(self):
         # Set PID structures to intial values
-        self.rightPID = PID(-100, 0, 0, 0, 0, 0, 0)
+        self.rightPID = PID(-200, 0, 0, 0, 0, 0, 0)
         self.rightPID.setPoint(0)
-        self.leftPID = PID( 100, 0, 0, 0, 0, 0, 0)
+        self.leftPID = PID(200, 0, 0, 0, 0, 0, 0)
         self.leftPID.setPoint(0)
         
         self.somethingWentWrong = False
@@ -136,7 +135,7 @@ class BaseController:
         L=.57
         R=.9424
         self.leftPID.setPoint( -(2*linearV - angularV*L)/(2*R))
-        self.rightPID.setPoint( -(2*linearV + angularV*L)/(2*R))
+        self.rightPID.setPoint( (2*linearV + angularV*L)/(2*R))
         
     def shutdown(self):
         """
@@ -159,7 +158,7 @@ class BaseController:
         # run loop 20 times a second
         newLeft = 0
         newRight = 0
-        r = rospy.Rate(20)
+        r = rospy.Rate(30)
         while not rospy.is_shutdown():
             # Wait until we get new data from both motors
             if self.newDataM1 and self.newDataM2:
@@ -202,9 +201,9 @@ class BaseController:
                     newLeft = 0
                     newRight = 0
                 if abs(newLeft) > 0:                
-                    print "setpoint %3f, measurement %f, update %f",'%1.2f' % self.leftPID.getPoint(), '%1.2f' % self.currentLeftV.get(), '%1.2f' % newLeft
-                    print "setpoint %3f, measurement %f, update %f",'%1.2f' % self.rightPID.getPoint(), '%1.2f' % self.currentRightV.get(),'%1.2f' % newRight
-                self.myRoboclaw.writeM1M2(newLeft,newRight)
+                    print "LEFT setpoint,  measurement, update",'%1.2f' % self.leftPID.getPoint(), '%1.2f' % self.currentLeftV.get(), '%1.2f' % newLeft, '%1.2f' % int(self.leftPID.update(self.currentLeftV.get()))
+                    print "RIGHT setpoint, measurement, update",'%1.2f' % self.rightPID.getPoint(), '%1.2f' % self.currentRightV.get(),'%1.2f' % newRight, '%1.2f' % int(self.rightPID.update(self.currentRightV.get()))
+                self.myRoboclaw.writeM1M2(newRight,newLeft) # MAKE SURE THESE ARE IN THE CORRECT ORDER!!!!
                 
             r.sleep()
             

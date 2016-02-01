@@ -50,7 +50,7 @@ def talker():
     rospy.init_node('nrfImus', anonymous=True)
     imu1Pub = rospy.Publisher('imu1', Imu, queue_size=3)
     imu2Pub = rospy.Publisher('imu2', Imu, queue_size=3)
-    rate = rospy.Rate(30) # 30Hz publish rate
+    rate = rospy.Rate(60) # 60Hz publish rate
 
     imu1Msg = Imu()
     imu2Msg = Imu()
@@ -59,8 +59,8 @@ def talker():
         buildImuMsg(myGateway.IMU1_read(), imu1Msg)
         buildImuMsg(myGateway.IMU2_read(), imu2Msg)
         # flip axis for the other imu to have them match
-        imu2Msg.angular_velocity.z *= -1
-        imu2Msg.linear_acceleration.x *= -1
+        #imu2Msg.angular_velocity.z *= -1
+        #imu2Msg.linear_acceleration.x *= -1
         # publish messages
         imu1Pub.publish(imu1Msg)
         imu2Pub.publish(imu2Msg)

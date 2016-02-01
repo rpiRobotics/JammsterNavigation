@@ -1,0 +1,5 @@
+<launch>
+    <node pkg="base_controller" type="base_controller_v2.py" name="base_controller"/>
+    <node pkg="imu_sensor" type="publishNRF.py" name="imuPublisher"/>
+    <node pkg="odometry" type="imuOdometryPublisher.py" name="odometry"/>
+</launch>
