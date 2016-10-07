@@ -11,20 +11,26 @@ serial_port_name="/dev/ttyACM0"
 
 class NrfImuInterface(object):
     def __init__(self):
-        self._serial=serial.Serial(serial_port_name,baudrate=57600)
-
+        self._serial=serial.Serial(serial_port_name,baudrate=57600,timeout=1)
+    
     def IMU1_read(self):
-        dat=struct.pack("BB",50,0)
-        self._serial.write(dat)
-        raw = self._serial.read(size = 14)
-        unConverted = struct.unpack( "hhhhhhh", raw )
-        converted = [unConverted[0]/16384.0, unConverted[1]/16384.0,unConverted[2]/16384.0,unConverted[3]/131.0,unConverted[4]/131.0,unConverted[5]/131.0, unConverted[6]]
-        return converted
-
+        #print "imu1..."
+        return self.read_data(33)
+    
     def IMU2_read(self):
-        dat=struct.pack("BB",50,1)
+        #print "imu2..."
+        return self.read_data(34)
+    
+    def read_data(self, channel):
+        dat=struct.pack("BB",50,channel)
+        #print "requesting data..."
         self._serial.write(dat)
+        #print "reading data..."
         raw = self._serial.read(size = 14)
+        if len(raw) < 14:
+            print "timeout", raw
+            return [0.0]*7
+        #print "unpacking message..."
         unConverted = struct.unpack( "hhhhhhh", raw )
         converted = [unConverted[0]/16384.0, unConverted[1]/16384.0,unConverted[2]/16384.0,unConverted[3]/131.0,unConverted[4]/131.0,unConverted[5]/131.0, unConverted[6]]
         return converted
@@ -56,8 +62,8 @@ def talker():
     imu2Msg = Imu()
     while not rospy.is_shutdown():
         # construct messages to be sent
-        buildImuMsg(myGateway.IMU1_read(), imu1Msg)
         buildImuMsg(myGateway.IMU2_read(), imu2Msg)
+        buildImuMsg(myGateway.IMU1_read(), imu1Msg)
         # flip axis for the other imu to have them match
         #imu2Msg.angular_velocity.z *= -1
         #imu2Msg.linear_acceleration.x *= -1
