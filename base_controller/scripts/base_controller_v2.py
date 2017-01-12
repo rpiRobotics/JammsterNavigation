@@ -6,12 +6,10 @@ Created on Mon Dec 21 10:46:10 2015
 @author: Andrew Cunningham
 """
 import rospy
-import math
 from sensor_msgs.msg import Imu
 from geometry_msgs.msg import Twist
-import serial
 import time
-from pid import PID
+from discrete_pid import PID
 import roboclaw
 #********************************#
 #              OBJECTS           #
@@ -80,9 +78,9 @@ class BaseController:
     """
     def __init__(self):
         # Set PID structures to intial values
-        self.rightPID = PID(-200, 0, 0, 0, 0, 0, 0)
+        self.rightPID = PID()
         self.rightPID.setPoint(0)
-        self.leftPID = PID(200, 0, 0, 0, 0, 0, 0)
+        self.leftPID = PID()
         self.leftPID.setPoint(0)
         
         self.somethingWentWrong = False
@@ -134,7 +132,7 @@ class BaseController:
         # calculate desired velocities for wheels see Georgia Tech mobile robot 2.2 video for equation
         L=.57
         R=.9424
-        self.leftPID.setPoint( -(2*linearV - angularV*L)/(2*R))
+        self.leftPID.setPoint( (2*linearV - angularV*L)/(2*R))
         self.rightPID.setPoint( (2*linearV + angularV*L)/(2*R))
         
     def shutdown(self):
