@@ -22,7 +22,7 @@ class MovingAverage:
     """
     def __init__(self):
         # array of readings
-        self.readings = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        self.readings = [0,0]
         # index of last reading added
         self.index = 0
         
@@ -50,10 +50,10 @@ class RoboClaw:
         self.m1Duty = 0
         self.m2Duty = 0
         #largest absolute value that the motors can be set to
-        self.dutyMax = 5000
+        self.dutyMax = 6000
         
         self.address = 0x80
-        roboclawPort = '/dev/ttyACM1'
+        roboclawPort = '/dev/ttyACM0'
         roboclaw.Open(roboclawPort,115200)
 
         
@@ -78,10 +78,13 @@ class BaseController:
     """
     def __init__(self):
         # Set PID structures to intial values
-        self.rightPID = PID()
+        self.rightPID = PID(a=.95, b=780, c=-480, d=0)
         self.rightPID.setPoint(0)
-        self.leftPID = PID()
+        self.leftPID = PID(a=.95, b=780, c=-480, d=0)
         self.leftPID.setPoint(0)
+
+        self.leftFeedforward = 0
+        self.rightFeedforward = 0
         
         self.somethingWentWrong = False
         
@@ -120,7 +123,7 @@ class BaseController:
     def imu2Callback(self,data):
         self.newDataM2 = True
         self.currentM2Measurement = data.angular_velocity.z
-        self.currentRightV.add(data.angular_velocity.z)
+        self.currentRightV.add(-data.angular_velocity.z)
     
     def commandCallback(self, data):
         """
@@ -134,6 +137,13 @@ class BaseController:
         R=.9424
         self.leftPID.setPoint( (2*linearV - angularV*L)/(2*R))
         self.rightPID.setPoint( (2*linearV + angularV*L)/(2*R))
+
+        if abs(self.leftPID.getPoint()) > 0:
+            self.leftFeedforward = self.leftPID.getPoint()/1.0 * 1000 + 3000*self.leftPID.getPoint()/abs(self.leftPID.getPoint())
+        
+        if abs(self.rightPID.getPoint()) > 0:
+            self.rightFeedforward = self.rightPID.getPoint()/1.0 * 1000 + 3000*self.rightPID.getPoint()/abs(self.rightPID.getPoint())
+
         
     def shutdown(self):
         """
@@ -156,7 +166,7 @@ class BaseController:
         # run loop 20 times a second
         newLeft = 0
         newRight = 0
-        r = rospy.Rate(30)
+        r = rospy.Rate(20)
         while not rospy.is_shutdown():
             # Wait until we get new data from both motors
             if self.newDataM1 and self.newDataM2:
@@ -184,16 +194,16 @@ class BaseController:
                     self.repeatCount = 0
                 
                 # If we have too many repeats, shut the system down
-                if self.repeatCount > 4:
+                if self.repeatCount > 6:
                     print "Too many repeats!"
                     self.shutdown()
                     
                 self.lastM1Measurement= self.currentM1Measurement
                 self.lastM2Measurement= self.currentM2Measurement           
                 
-                newLeft = newLeft + int(self.leftPID.update(self.currentLeftV.get()))
-                newRight = newRight + int(self.rightPID.update(self.currentRightV.get()))
-                
+                newLeft = int(self.leftPID.update(self.currentLeftV.get()) + self.leftFeedforward)
+                newRight = int(self.rightPID.update(self.currentRightV.get()) + self.rightFeedforward)
+
                 #catch special case of not moving
                 if self.leftPID.getPoint() == 0 and self.rightPID.getPoint() == 0:
                     newLeft = 0
@@ -203,8 +213,7 @@ class BaseController:
                     print "RIGHT setpoint, measurement, update",'%1.2f' % self.rightPID.getPoint(), '%1.2f' % self.currentRightV.get(),'%1.2f' % newRight, '%1.2f' % int(self.rightPID.update(self.currentRightV.get()))
                 self.myRoboclaw.writeM1M2(newRight,newLeft) # MAKE SURE THESE ARE IN THE CORRECT ORDER!!!!
                 
-            r.sleep()
-            
+            r.sleep()            
 
 def main():
     rospy.init_node('base_controller', anonymous=True)
