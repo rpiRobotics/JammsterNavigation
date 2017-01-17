@@ -11,6 +11,7 @@ from geometry_msgs.msg import Twist
 import time
 from discrete_pid import PID
 import roboclaw
+from std_msgs.msg import Int16
 #********************************#
 #              OBJECTS           #
 #********************************#
@@ -55,6 +56,8 @@ class RoboClaw:
         self.address = 0x80
         roboclawPort = '/dev/ttyACM0'
         roboclaw.Open(roboclawPort,115200)
+        self.pub_left = rospy.Publisher('left_voltage_pwm', Int16, queue_size = 1)
+        self.pub_right = rospy.Publisher('right_voltage_pwm', Int16, queue_size = 1)
 
         
     def writeM1M2(self,m1Duty,m2Duty):
@@ -69,8 +72,11 @@ class RoboClaw:
             self.m2Duty = m2Duty
          
         #print self.m1Duty,self.m2Duty
+        self.pub_left.Publish(Int16(self.m1Duty))
+        self.pub_right.Publish(Int16(self.m2Duty))
         roboclaw.DutyAccelM1(self.address,5000,self.m1Duty)
         roboclaw.DutyAccelM2(self.address,5000,self.m2Duty)
+        
             
 class BaseController:
     """
@@ -104,6 +110,7 @@ class BaseController:
         rospy.Subscriber("/cmd_vel",  Twist,  self.commandCallback)
         rospy.Subscriber("/imu1", Imu, self.imu1Callback)
         rospy.Subscriber("/imu2", Imu, self.imu2Callback)
+        
         time.sleep(1)
         
         self.lastDataTime = time.time()
@@ -212,6 +219,7 @@ class BaseController:
                     print "LEFT setpoint,  measurement, update",'%1.2f' % self.leftPID.getPoint(), '%1.2f' % self.currentLeftV.get(), '%1.2f' % newLeft, '%1.2f' % int(self.leftPID.update(self.currentLeftV.get()))
                     print "RIGHT setpoint, measurement, update",'%1.2f' % self.rightPID.getPoint(), '%1.2f' % self.currentRightV.get(),'%1.2f' % newRight, '%1.2f' % int(self.rightPID.update(self.currentRightV.get()))
                 self.myRoboclaw.writeM1M2(newRight,newLeft) # MAKE SURE THESE ARE IN THE CORRECT ORDER!!!!
+        
                 
             r.sleep()            
 

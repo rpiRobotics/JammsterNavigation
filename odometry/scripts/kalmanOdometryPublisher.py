@@ -5,6 +5,7 @@ import rospy
 from sensor_msgs.msg import Imu
 from nav_msgs.msg import Odometry
 import tf
+from std_msgs.msg import Int16
 
 class ExtendedWMRKalmanFilter:
     """ Class to predict a wheeled mobile robot state [dtheta_l, dtheta_r,x,y,theta]
@@ -92,7 +93,15 @@ class StatePredictionNode:
         self.pub = rospy.Publisher('odometry', Odometry, queue_size=1)
         rospy.Subscriber("/imu1", Imu, self._imu1Callback)
         rospy.Subscriber("/imu2", Imu, self._imu2Callback)
-    
+        rospy.Subscriber("left_voltage_pwm", Int16, self._leftMotorCallback) 
+        rospy.Subscriber("right_voltage_pwm", Int16, self._rightMotorCallback)
+        
+    def _leftMotorCallback(self, data):
+        self.control_voltages[0] = data.data
+        
+    def _rightMotorCallback(self, data):
+        self.control_voltages[1] = data.data
+        
     def _imu1Callback(self, data):
         self.vl = data.angular_velocity.z
         if abs(self.vl) < .02:
