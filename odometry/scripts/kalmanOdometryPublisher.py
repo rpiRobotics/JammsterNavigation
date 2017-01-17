@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import numpy as np
 import math
 import rospy
@@ -32,7 +33,7 @@ class ExtendedWMRKalmanFilter:
         
         self.A = np.eye(2)
         self.B = np.eye(2)
-        self.C = np.array([ [1,0],[0,1],[0,0],[0,0],[0,0] ]) # assume we can only read wheel velocities for the time being
+        self.H = np.array([ [1,0],[0,1],[0,0],[0,0],[0,0] ]) # assume we can only read wheel velocities for the time being
         
     def predict(self, u):
         """ Predict new state from old state and command
@@ -72,6 +73,8 @@ class ExtendedWMRKalmanFilter:
 class StatePredictionNode:
     """ This class contains the methods for state prediction """
     def __init__(self):
+
+        rospy.init_node('odometry', anonymous=True)
         self.control_voltages = np.zeros([2,1])
         self.vl = 0
         self.vr = 0
@@ -126,3 +129,6 @@ class StatePredictionNode:
             
             self.pub.publish(msg)
             r.sleep()
+
+my_node = StatePredictionNode()
+my_node.loop()
