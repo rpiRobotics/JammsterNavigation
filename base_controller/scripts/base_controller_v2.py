@@ -78,9 +78,9 @@ class BaseController:
     """
     def __init__(self):
         # Set PID structures to intial values
-        self.rightPID = PID(a=.95, b=780, c=-480, d=0)
+        self.rightPID = PID(a=.95, b=2*780, c=-2*480, d=0)
         self.rightPID.setPoint(0)
-        self.leftPID = PID(a=.95, b=780, c=-480, d=0)
+        self.leftPID = PID(a=.95, b=2*780, c=-2*480, d=0)
         self.leftPID.setPoint(0)
 
         self.leftFeedforward = 0
@@ -117,13 +117,13 @@ class BaseController:
     
     def imu1Callback(self,data):
         self.newDataM1 = True
-        self.currentM1Measurement = data.angular_velocity.z
-        self.currentLeftV.add(data.angular_velocity.z)
+        self.currentM1Measurement = -data.angular_velocity.x
+        self.currentLeftV.add(-data.angular_velocity.x)
         
     def imu2Callback(self,data):
         self.newDataM2 = True
-        self.currentM2Measurement = data.angular_velocity.z
-        self.currentRightV.add(-data.angular_velocity.z)
+        self.currentM2Measurement = -data.angular_velocity.x
+        self.currentRightV.add(-data.angular_velocity.x)
     
     def commandCallback(self, data):
         """
@@ -166,7 +166,7 @@ class BaseController:
         # run loop 20 times a second
         newLeft = 0
         newRight = 0
-        r = rospy.Rate(20)
+        r = rospy.Rate(50)
         while not rospy.is_shutdown():
             # Wait until we get new data from both motors
             if self.newDataM1 and self.newDataM2:
@@ -194,7 +194,7 @@ class BaseController:
                     self.repeatCount = 0
                 
                 # If we have too many repeats, shut the system down
-                if self.repeatCount > 6:
+                if self.repeatCount > 60:
                     print "Too many repeats!"
                     self.shutdown()
                     
