@@ -33,7 +33,7 @@ class ExtendedWMRKalmanFilter:
         
         self.A = np.eye(2)
         self.B = np.eye(2)
-        self.H = np.array([ [1,0],[0,1],[0,0],[0,0],[0,0] ]) # assume we can only read wheel velocities for the time being
+        self.H = np.array([ [1,0],[0,1],[0,0],[0,0],[0,0] ]).transpose() # assume we can only read wheel velocities for the time being
         
     def predict(self, u):
         """ Predict new state from old state and command
@@ -95,13 +95,18 @@ class StatePredictionNode:
     
     def _imu1Callback(self, data):
         self.vl = data.angular_velocity.z
+        if abs(self.vl) < .02:
+            self.vl = 0
         
     def _imu2Callback(self, data):
         self.vr = data.angular_velocity.z
-        
+        if abs(self.vr) < .02:
+            self.vr = 0        
+
     def loop(self):
         r = rospy.Rate(50)
         while not rospy.is_shutdown():
+            print self.ekf.current_state_estimate[4]
             ## USE KALMAN FILTER
             self.ekf.predict(self.control_voltages)
             self.ekf.measurement_update(np.array([[self.vl], [self.vr]]))
@@ -124,7 +129,7 @@ class StatePredictionNode:
             msg.twist.twist.linear.y = (self.r/2)*(self.ekf.current_state_estimate[0]\
                 + self.ekf.current_state_estimate[1])*math.sin(self.ekf.current_state_estimate[4])
             msg.twist.twist.linear.z = 0
-            msg.twist.angular.z = (self.r/self.l)*(self.ekf.current_state_estimate[1]\
+            msg.twist.twist.angular.z = (self.r/self.l)*(self.ekf.current_state_estimate[1]\
                 - self.ekf.current_state_estimate[0])
             
             self.pub.publish(msg)
