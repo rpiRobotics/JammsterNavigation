@@ -43,21 +43,27 @@ class ExtendedWMRKalmanFilter:
 
         dtheta_l = self.current_state_estimate[0,0]
         dtheta_r = self.current_state_estimate[1,0]
+        x = self.current_state_estimate[2,0]
+        y = self.current_state_estimate[3,0]
         theta = self.current_state_estimate[4,0]
+        vl = u[0,0]
+        vr = u[1,0]
         
-        self.A = np.array([[1+self.dt*self.k2_l, 0, 0, 0, 0],\
-                           [0, 1+self.dt*self.k2_r, 0, 0, 0],\
-                           [self.dt*(self.r)/2*math.cos(theta), self.dt*self.r/2*math.cos(theta), 1, 0, -math.sin(theta)*self.dt*(dtheta_r+dtheta_l)],\
-                           [self.dt*(self.r)/2*math.sin(theta), self.dt*self.r/2*math.sin(theta), 0, 1, math.cos(theta)*self.dt*(dtheta_r+dtheta_l)],\
-                           [-self.dt*self.r/self.l, self.dt*self.r/self.l, 0, 0, 1]])
+        ## TRANSITION ESTIMATE
+        self.current_state_estimate[0] = self.dt*(self.k2_l*dtheta_l + self.k1_l*vl)
+        self.current_state_estimate[1] = self.dt*(self.k2_r*dtheta_r + self.k1_r*vr)
+        self.current_state_estimate[2] = x + (self.dt)*(self.r/2)*(dtheta_l+dtheta_r)*math.cos(theta)
+        self.current_state_estimate[3] = y + (self.dt)*(self.r/2)*(dtheta_l+dtheta_r)*math.sin(theta)
+        self.current_state_estimate[4] = theta + (self.dt)*(self.r/self.l)*(dtheta_r - dtheta_l)
                            
-        self.B = np.array([[self.dt*self.k1_l, 0],\
-                           [0, self.dt*self.k1_r],\
-                           [0, 0],\
-                           [0, 0],\
-                           [0, 0]])
+        ## TRANISTION PROBABILITY
+        self.A = np.array([[self.dt*self.k2_l, 0, 0, 0, 0],\
+                           [0, self.dt*self.k2_r, 0, 0, 0],\
+                           [self.dt*(self.r)/2*math.cos(theta), self.dt*self.r/2*math.cos(theta), 0, 0, -math.sin(theta)*self.dt*(dtheta_r+dtheta_l)],\
+                           [self.dt*(self.r)/2*math.sin(theta), self.dt*self.r/2*math.sin(theta), 0, 0, math.cos(theta)*self.dt*(dtheta_r+dtheta_l)],\
+                           [-self.dt*self.r/self.l, self.dt*self.r/self.l, 0, 0, 0]])
                         
-        self.current_state_estimate = np.dot(self.A, self.current_state_estimate) + np.dot(self.B, u)
+        self.current_state_estimate = np.dot(self.transition_A, self.current_state_estimate) + np.dot(self.transition_B, u)
         self.current_prob_estimate = np.dot(np.dot(self.A, self.current_prob_estimate), np.transpose(self.A)) + self.Q
 
     def measurement_update(self, measurement_vector):
