@@ -11,7 +11,10 @@
 #     pid = p.update(measurement_value)
 #
 #
+import math
 
+def deltaAngle(x, y):
+    return math.atan2(math.sin(x-y), math.cos(x-y))
 
 class PID:
 	"""
@@ -36,7 +39,7 @@ class PID:
 		Calculate PID output value for given reference input and feedback
 		"""
 
-		self.error = self.set_point - current_value
+		self.error = deltaAngle(self.set_point,  current_value)
 
 		self.P_value = self.Kp * self.error
 		self.D_value = self.Kd * ( self.error - self.Derivator)
