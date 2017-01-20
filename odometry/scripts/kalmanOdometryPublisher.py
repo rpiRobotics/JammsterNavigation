@@ -50,8 +50,8 @@ class ExtendedWMRKalmanFilter:
         vr = u[1,0]
         
         ## TRANSITION ESTIMATE
-        self.current_state_estimate[0] = self.dt*(self.k2_l*dtheta_l + self.k1_l*vl)
-        self.current_state_estimate[1] = self.dt*(self.k2_r*dtheta_r + self.k1_r*vr)
+        self.current_state_estimate[0] += self.dt*(self.k2_l*dtheta_l + self.k1_l*vl)
+        self.current_state_estimate[1] += self.dt*(self.k2_r*dtheta_r + self.k1_r*vr)
         self.current_state_estimate[2] = x + (self.dt)*(self.r/2)*(dtheta_l+dtheta_r)*math.cos(theta)
         self.current_state_estimate[3] = y + (self.dt)*(self.r/2)*(dtheta_l+dtheta_r)*math.sin(theta)
         self.current_state_estimate[4] = theta + (self.dt)*(self.r/self.l)*(dtheta_r - dtheta_l)
@@ -63,7 +63,6 @@ class ExtendedWMRKalmanFilter:
                            [self.dt*(self.r)/2*math.sin(theta), self.dt*self.r/2*math.sin(theta), 0, 0, math.cos(theta)*self.dt*(dtheta_r+dtheta_l)],\
                            [-self.dt*self.r/self.l, self.dt*self.r/self.l, 0, 0, 0]])
                         
-        self.current_state_estimate = np.dot(self.transition_A, self.current_state_estimate) + np.dot(self.transition_B, u)
         self.current_prob_estimate = np.dot(np.dot(self.A, self.current_prob_estimate), np.transpose(self.A)) + self.Q
 
     def measurement_update(self, measurement_vector):
@@ -84,20 +83,21 @@ class StatePredictionNode:
     def __init__(self):
 
         rospy.init_node('odometry', anonymous=True)
+        self.dt = .05
         self.control_voltages = np.zeros([2,1])
         self.vl = 0
         self.vr = 0
         
-        Q = np.array([[.1, 0, 0, 0, 0],
-              [0, .1, 0, 0, 0],
+        Q = np.array([[.01, 0, 0, 0, 0],
+              [0, .01, 0, 0, 0],
               [0, 0, 0, 0, 0],
               [0, 0, 0, 0, 0],
               [0, 0, 0, 0, 0]])
-        R = np.eye(2) * .15
+        R = np.eye(2) * .001
         starting_state = np.zeros([5,1])
         self.r = .15
         self.l = .55
-        self.ekf = ExtendedWMRKalmanFilter(self.r, self.l, Q, R, 2.3364e-04, -.65, 2.0624e-04, -.6189, starting_state, .05)
+        self.ekf = ExtendedWMRKalmanFilter(self.r, self.l, Q, R, 2.3364e-04, -.65, 2.3364e-04, -.65, starting_state, self.dt)
         self.pub = rospy.Publisher('odometry', Odometry, queue_size=1)
         rospy.Subscriber("/imu1", Imu, self._imu1Callback)
         rospy.Subscriber("/imu2", Imu, self._imu2Callback)
@@ -126,7 +126,7 @@ class StatePredictionNode:
         self.f.write(str(state[0,0]) + ',' + str(state[1,0]) + ','+  str(state[2,0]) +  ',' + str(state[3,0]) +  ',' + str(state[4,0]) + ',' + str(measurement[0,0]) + ',' + str(measurement[1,0])  +  '\n') 
 
     def loop(self):
-        r = rospy.Rate(20)
+        r = rospy.Rate(1/self.dt)
         while not rospy.is_shutdown():
             if abs(self.vl) > .05 and abs(self.vr) > .05:
                 print self.ekf.current_state_estimate
@@ -135,6 +135,7 @@ class StatePredictionNode:
             self.ekf.predict(self.control_voltages)
             self.ekf.measurement_update(np.array([[self.vl], [self.vr]]))
             state = copy.deepcopy(self.ekf.current_state_estimate)
+            
             self._writeToFile(state, np.array([[self.vl], [self.vr]]))
             ## BUILD AND SEND MSG
             quaternion = tf.transformations.quaternion_from_euler(0, 0, state[4])
