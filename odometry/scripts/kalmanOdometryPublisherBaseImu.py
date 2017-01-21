@@ -73,8 +73,10 @@ class ExtendedWMRKalmanFilter:
                         
         self.current_prob_estimate = np.dot(np.dot(self.A, self.current_prob_estimate), np.transpose(self.A)) + self.Q
 
-    def measurement_update(self, measurement_vector):
+    def measurement_update(self, measurement_vector, H='null'):
         """ Update Kalman filter if sensing information is received """
+        if not H == 'null':
+            self.H = H
        #--------------------------Observation step-----------------------------
         innovation = measurement_vector - np.dot(self.H, self.current_state_estimate)
         innovation_covariance = np.dot(np.dot(self.H, self.current_prob_estimate), np.transpose(self.H)) + self.R
