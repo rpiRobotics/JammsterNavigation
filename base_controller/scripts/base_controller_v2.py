@@ -72,8 +72,8 @@ class RoboClaw:
             self.m2Duty = m2Duty
          
         #print self.m1Duty,self.m2Duty
-        self.pub_left.Publish(Int16(self.m1Duty))
-        self.pub_right.Publish(Int16(self.m2Duty))
+        self.pub_left.publish(Int16(self.m1Duty))
+        self.pub_right.publish(Int16(self.m2Duty))
         roboclaw.DutyAccelM1(self.address,5000,self.m1Duty)
         roboclaw.DutyAccelM2(self.address,5000,self.m2Duty)
         
@@ -140,8 +140,8 @@ class BaseController:
         linearV=data.linear.x
         angularV=data.angular.z
         # calculate desired velocities for wheels see Georgia Tech mobile robot 2.2 video for equation
-        L=.57
-        R=.9424
+        L=.5
+        R=.15
         self.leftPID.setPoint( (2*linearV - angularV*L)/(2*R))
         self.rightPID.setPoint( (2*linearV + angularV*L)/(2*R))
 
