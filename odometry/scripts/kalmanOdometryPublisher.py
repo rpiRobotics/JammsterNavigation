@@ -83,17 +83,17 @@ class StatePredictionNode:
     def __init__(self):
 
         rospy.init_node('odometry', anonymous=True)
-        self.dt = .05
+        self.dt = .0125
         self.control_voltages = np.zeros([2,1])
         self.vl = 0
         self.vr = 0
         
-        Q = np.array([[.01, 0, 0, 0, 0],
-              [0, .01, 0, 0, 0],
+        Q = np.array([[1e-4, 0, 0, 0, 0],
+              [0, 1e-4, 0, 0, 0],
               [0, 0, 0, 0, 0],
               [0, 0, 0, 0, 0],
               [0, 0, 0, 0, 0]])
-        R = np.eye(2) * .001
+        R = np.eye(2) * 5e-5
         starting_state = np.zeros([5,1])
         self.r = .15
         self.l = .55
@@ -113,13 +113,13 @@ class StatePredictionNode:
         self.control_voltages[1] = data.data
         
     def _imu1Callback(self, data):
-        self.vl = data.angular_velocity.z
-        if abs(self.vl) < .1:
+        self.vl = data.angular_velocity.x
+        if abs(self.vl) < .07:
             self.vl = 0
         
     def _imu2Callback(self, data):
-        self.vr = data.angular_velocity.z
-        if abs(self.vr) < .1:
+        self.vr = data.angular_velocity.x
+        if abs(self.vr) < .07:
             self.vr = 0        
 
     def _writeToFile(self, state, measurement):
