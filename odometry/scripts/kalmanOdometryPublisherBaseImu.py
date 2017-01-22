@@ -63,20 +63,23 @@ class ExtendedWMRKalmanFilter:
         self.current_state_estimate[6] += (self.dt)*self.current_state_estimate[3]
                            
         ## TRANISTION PROBABILITY
-        self.A = np.array([[self.dt*self.k2_l, 0, 0, 0, 0, 0, 0],\
-                           [0, self.dt*self.k2_r, 0, 0, 0, 0, 0],\
+        self.A = np.array([[1+self.dt*self.k2_l, 0, 0, 0, 0, 0, 0],\
+                           [0, 1+self.dt*self.k2_r, 0, 0, 0, 0, 0],\
                            [self.r/2, self.r/2, 0, 0, 0, 0, 0],\
                            [-self.r/self.l, self.r/self.l, 0, 0, 0, 0, 0],\
                            [0, 0, math.cos(theta)*self.dt , 0, 1, 0, -v*math.sin(theta)*self.dt],\
-                           [0, 0, math.sin(theta)*self.dt , 0, 1, 0, v*math.cos(theta)*self.dt],\
+                           [0, 0, math.sin(theta)*self.dt , 0, 0, 1, v*math.cos(theta)*self.dt],\
                            [0, 0, 0, self.dt, 0, 0, 1]])
                         
         self.current_prob_estimate = np.dot(np.dot(self.A, self.current_prob_estimate), np.transpose(self.A)) + self.Q
 
-    def measurement_update(self, measurement_vector, H='null'):
+    def measurement_update(self, measurement_vector, H='null', R = 'null'):
         """ Update Kalman filter if sensing information is received """
         if not H == 'null':
             self.H = H
+
+        if not R == 'null':
+            self.R = R
        #--------------------------Observation step-----------------------------
         innovation = measurement_vector - np.dot(self.H, self.current_state_estimate)
         innovation_covariance = np.dot(np.dot(self.H, self.current_prob_estimate), np.transpose(self.H)) + self.R
@@ -93,15 +96,26 @@ class StatePredictionNode:
     def __init__(self):
 
         rospy.init_node('odometry', anonymous=True)
-        self.dt = .01
+        self.dt = .02
         self.control_voltages = np.zeros([2,1])
         self.vl = 0     # left wheel velocity
         self.vr = 0     # right wheel velocity
         self.vb = 0     # base angular velocity
-        
+
+        self.base_imu_ready = False # base imu is slower than the other IMU's
+                                    # we can't update base velocity all the time
+
+        self.H_all = np.array([[1,0,0,0,0,0,0],\
+                               [0,1,0,0,0,0,0],\
+                               [0,0,0,1,0,0,0]])
+    
+        self.H_wheels_only = np.array([[1,0,0,0,0,0,0],\
+                           [0,1,0,0,0,0,0]])  
+
         Q = np.zeros([7,7])
-        Q[0,0] = .1
-        Q[1,1] = .1
+        Q[0,0] = .01
+        Q[1,1] = .01
+        Q[3,3] = .01
         R = np.eye(3) * .001
         starting_state = np.zeros([7,1])
         self.r = .15
@@ -123,19 +137,22 @@ class StatePredictionNode:
         self.control_voltages[1] = data.data
         
     def _imu1Callback(self, data):
-        self.vl = data.angular_velocity.z
+        self.vl = -data.angular_velocity.x
         if abs(self.vl) < .1:
             self.vl = 0
         
     def _imu2Callback(self, data):
-        self.vr = data.angular_velocity.z
+        self.vr = -data.angular_velocity.x
         if abs(self.vr) < .1:
             self.vr = 0       
             
     def _imu3Callback(self, data):
-        self.vb = data.angular_velocity.z
-        if abs(self.vb) < .1:
+        self.vb = data.angular_velocity.z-.01
+        if abs(self.vb) < .05:
             self.vb = 0   
+            return
+
+        self.base_imu_ready = True
             
     def _writeToFile(self, state, measurement):
         self.f.write(str(state[0,0]) + ',' + str(state[1,0]) + ','+  str(state[2,0]) +  ',' + str(state[3,0]) +  ',' + str(state[4,0]) + ',' + str(measurement[0,0]) + ',' + str(measurement[1,0])  +  '\n') 
@@ -143,16 +160,28 @@ class StatePredictionNode:
     def loop(self):
         np.set_printoptions(precision=3, suppress=True)
         r = rospy.Rate(1/self.dt)
+        i = 0
         while not rospy.is_shutdown():
-            if abs(self.vl) > .05 and abs(self.vr) > .05:
+            i += 1
+            if i%40 == 0:
+                i = 0
                 print self.ekf.current_state_estimate
 
             ## USE KALMAN FILTER
             self.ekf.predict(self.control_voltages)
-            self.ekf.measurement_update(np.array([[self.vl], [self.vr], [self.vb]]))
+
+            if self.base_imu_ready:
+                R = np.eye(3)*4e-4
+                R[2,2] = 4e-5
+                self.ekf.measurement_update(np.array([[self.vl], [self.vr], [self.vb]]), self.H_all, np.eye(3)*.001)
+                self.base_imu_ready = False
+            else:
+                self.ekf.measurement_update(np.array([[self.vl], [self.vr]]), self.H_wheels_only, np.eye(2)*4e-4)
+
             state = copy.deepcopy(self.ekf.current_state_estimate)
             
             self._writeToFile(state, np.array([[self.vl], [self.vr]]))
+
             ## BUILD AND SEND MSG
             quaternion = tf.transformations.quaternion_from_euler(0, 0, state[4])
             
