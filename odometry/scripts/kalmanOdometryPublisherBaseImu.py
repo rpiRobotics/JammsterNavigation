@@ -7,6 +7,7 @@ from nav_msgs.msg import Odometry
 import tf
 from std_msgs.msg import Int16
 import copy
+import time
 
 class ExtendedWMRKalmanFilter:
     """ Class to predict a wheeled mobile robot state [dtheta_l, dtheta_r, v, w, x,y,theta]
@@ -171,12 +172,12 @@ class StatePredictionNode:
             self.ekf.predict(self.control_voltages)
 
             if self.base_imu_ready:
-                R = np.eye(3)*4e-4
+                R = np.eye(3)*.06
                 R[2,2] = 4e-5
-                self.ekf.measurement_update(np.array([[self.vl], [self.vr], [self.vb]]), self.H_all, np.eye(3)*.001)
+                self.ekf.measurement_update(np.array([[self.vl], [self.vr], [self.vb]]), self.H_all, R)
                 self.base_imu_ready = False
             else:
-                self.ekf.measurement_update(np.array([[self.vl], [self.vr]]), self.H_wheels_only, np.eye(2)*4e-4)
+                self.ekf.measurement_update(np.array([[self.vl], [self.vr]]), self.H_wheels_only, np.eye(2)*.06)
 
             state = copy.deepcopy(self.ekf.current_state_estimate)
             
