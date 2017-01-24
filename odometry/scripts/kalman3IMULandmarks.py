@@ -160,7 +160,7 @@ class StatePredictionNode:
         self.control_voltages[1] = data.data
         
     def _imu1Callback(self, data):
-        self.vl = -data.angular_velocity.x
+        self.vl = -data.angular_velocity.z
         if abs(self.vl) < .1:
             self.vl = 0
             return
@@ -168,7 +168,7 @@ class StatePredictionNode:
         self.observed_list.append('imu1')
         
     def _imu2Callback(self, data):
-        self.vr = -data.angular_velocity.x
+        self.vr = -data.angular_velocity.z
         if abs(self.vr) < .1:
             self.vr = 0       
             return
@@ -282,7 +282,7 @@ class StatePredictionNode:
             measurements = np.vstack((measurements, measurement))
             
         # BUILD R
-        R = np.zeros_like(H)
+        R = np.zeros([H.shape[0], H.shape[0]])
         r_index = 0 # element of diagonal to fill
         for r_elem in R_list:
             R[r_index, r_index] = r_elem
