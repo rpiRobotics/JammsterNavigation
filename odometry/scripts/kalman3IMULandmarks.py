@@ -7,18 +7,19 @@ from nav_msgs.msg import Odometry
 import tf
 from std_msgs.msg import Int16
 import copy
-import time
+from tf import TransformListener
+from ar_track_alvar_msgs.msg import AlvarMarkers
 
 class ARTAG_landmark:
     """ Class used to represent an ARTAG landmark """
-    def __init__(self, tag_num, slam_id, x, y, z, theta_z, fixed = True):
+    def __init__(self, tag_num, slam_id, x, y, z, theta_y, fixed = True):
         self.tag_num = tag_num  # number the AR tag encodes
         self.slam_id = slam_id  # position in the state vector
         self.fixed = fixed      # whether or not the tag's position can be updated (AKA SLAM)
         self.x = x
         self.y = y
         self.z = z
-        self.theta_z = theta_z
+        self.theta_y = theta_y
         
 class alvar_map:
     def __init__(self):
@@ -58,7 +59,7 @@ class ExtendedWMRKalmanFilter:
         self.current_prob_estimate = np.zeros([starting_state.shape[0], starting_state.shape[0]])
         self.dt = dt
         
-        self.A = np.eye(2)
+        self.A = np.zeros([self.current_state_estimate.shape[0], self.current_state_estimate.shape[0]])
         self.B = np.eye(2)
         self.H = np.array([[1,0,0,0,0,0,0],\
                            [0,1,0,0,0,0,0],\
@@ -88,7 +89,8 @@ class ExtendedWMRKalmanFilter:
         self.current_state_estimate[6] += (self.dt)*self.current_state_estimate[3]
                            
         ## TRANISTION PROBABILITY
-        self.A = np.array([[1+self.dt*self.k2_l, 0, 0, 0, 0, 0, 0],\
+        # only propogate the things that can move
+        self.A[0:7, 0:7] = np.array([[1+self.dt*self.k2_l, 0, 0, 0, 0, 0, 0],\
                            [0, 1+self.dt*self.k2_r, 0, 0, 0, 0, 0],\
                            [self.r/2, self.r/2, 0, 0, 0, 0, 0],\
                            [-self.r/self.l, self.r/self.l, 0, 0, 0, 0, 0],\
@@ -116,6 +118,25 @@ class ExtendedWMRKalmanFilter:
         # eye(n) = nxn identity matrix.
         self.current_prob_estimate = np.dot((np.eye(size)-np.dot(kalman_gain,self.H)), self.current_prob_estimate)
 
+
+    def add_AR_tag(self, transform, certainty):
+        """ Add an AR tag to the state of the EKF
+        @transform np.array([x,y,theta_y]) assumes orientation constraint
+        @certainty np.eye(4) * scale for how sure we are of the state of the tag"""
+        self.current_state_estimate = np.vstack((self.current_state_estimate, transform))
+        self.A = np.zeros([self.current_state_estimate.shape[0], self.current_state_estimate.shape[0]])
+        new_prob_estimate = np.zeros([self.current_state_estimate.shape[0], self.current_state_estimate.shape[0]])
+        new_prob_estimate[0:self.current_prob_estimate.shape[0], 0:self.current_prob_estimate.shape[0]] = self.current_prob_estimate
+        new_prob_estimate[self.current_prob_estimate.shape[0]:, self.current_prob_estimate.shape[0]:] = certainty
+        
+        new_Q = np.zeros([self.current_state_estimate.shape[0], self.current_state_estimate.shape[0]])
+        new_Q[0:self.current_state_estimate.shape[0]-3, 0:self.current_state_estimate.shape[0]-3] = self.Q
+        self.Q = new_Q
+        
+        new_prob_est = np.zeros([self.current_state_estimate.shape[0], self.current_state_estimate.shape[0]])
+        new_prob_est[0:self.current_state_estimate.shape[0]-3, 0:self.current_state_estimate.shape[0]-3] = self.current_prob_estimate
+        self.current_prob_estimate = new_prob_est
+
 class StatePredictionNode:
     """ This class contains the methods for state prediction """
     def __init__(self):
@@ -139,6 +160,8 @@ class StatePredictionNode:
         self.r = .15
         self.l = .55
         self.ekf = ExtendedWMRKalmanFilter(self.r, self.l, Q, R, 2.3364e-04, -.65, 2.3364e-04, -.65, starting_state, self.dt)
+        self.listener = TransformListener()
+
 
         self.i = 0 # print index
 
@@ -148,10 +171,16 @@ class StatePredictionNode:
         rospy.Subscriber("/imu3", Imu, self._imu3Callback)
         rospy.Subscriber("left_voltage_pwm", Int16, self._leftMotorCallback) 
         rospy.Subscriber("right_voltage_pwm", Int16, self._rightMotorCallback)
+        rospy.Subscriber("ar_pose_marker", AlvarMarkers, self._arCallback )
         
         self.observed_list = []
         self.sensed_ar_diff = {}  # map from tag_id sensed to array of np.array([dx, dy, dtheta_z])
         self.landmark_map = {}
+
+        ## ADD PREDEFINED MAPS
+        transform = np.zeros([3,1])
+        self.landmark_map[0] = ARTAG_landmark(0,1,0,0,0,0)
+        self.ekf.add_AR_tag(transform, np.zeros([3,3]))
         
     def _leftMotorCallback(self, data):
         self.control_voltages[0] = data.data
@@ -184,15 +213,20 @@ class StatePredictionNode:
         self.observed_list.append('imu3')
         
     def _arCallback(self, data):
-        if data.id in self.landmark_map:
-            self.observed_list.append(data.id)
-            quat = data.pose.pose.orientation
-            angle = tf.transformations.euler_from_quaternion(quat)
-            self.sensed_ar_diff[data.id] = np.array([[data.pose.pose.position.x],\
-                                                     [data.pose.pose.position.y],\
-                                                     [angle[2]]])
+        for marker in data.markers:
+            if marker.id in self.landmark_map:
+                self.observed_list.append(marker.id)  # we observed an AR tag!
+                tag_frame = 'ar_marker_'+str(marker.id)
+                t = self.listener.getLatestCommonTime(tag_frame, 'base')
+                position, quat = self.listener.lookupTransform(tag_frame, 'base', t)
+                angle = tf.transformations.euler_from_quaternion(quat)
+                self.sensed_ar_diff[marker.id] = np.array([[marker.pose.pose.position.x],\
+                                                         [marker.pose.pose.position.y],\
+                                                         [angle[1]]])
+                                                         
         return
-            
+     
+       
     def _publish_odom(self):
         state = copy.deepcopy(self.ekf.current_state_estimate)
             
@@ -258,8 +292,9 @@ class StatePredictionNode:
             if landmark_id in self.observed_list:
                 slam_id = self.landmark_map[landmark_id].slam_id
                 H_block = np.zeros([3, num_states])
-                H_block[4:7, 4:7] = np.eye(3)
-                H_block[4+slam_id:7+slam_id, 4+slam_id:7+slam_id] = -np.eye(3)
+                H_block[:, 4:7] = np.eye(3)
+                H_block[:, 4+slam_id:7+slam_id] = -np.eye(3)
+                H_list.append(H_block)
                 
                 # measurements
                 measurement_list.append(self.sensed_ar_diff[landmark_id])
