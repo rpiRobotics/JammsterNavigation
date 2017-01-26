@@ -131,7 +131,6 @@ class ExtendedWMRKalmanFilter:
         """ Update Kalman filter if sensing information is received """
         self.H = H
         self.R = R
-        
        #--------------------------Observation step-----------------------------
         innovation = measurement_vector - measurement_function(self.current_state_estimate)
         innovation_covariance = np.dot(np.dot(self.H, self.current_prob_estimate), np.transpose(self.H)) + self.R
@@ -353,10 +352,12 @@ class StatePredictionNode:
                 y = self.ekf.current_state_estimate[5]
                 dist = self.sensed_ar_diff[landmark_id][0]
                 
-                H = np.array([[-(mx - x)/math.sqrt(dist),  -(my-y)/math.sqrt(dist)],
-                              [(my-y)/(dist), -(mx-x)/(dist)]])
-                              
-                R = np.eye(2) * 4E-3
+                H = np.zeros([2, self.ekf.current_prob_estimate.shape[0]])
+                H_block = np.array([[-(mx - x)/math.sqrt(dist),  -(my-y)/math.sqrt(dist)],\
+                [(my-y)/(dist), -(mx-x)/(dist)]])
+                H[:,4:6] = H_block[:,:,0]
+                 
+                R = np.eye(2)* 4E-3
                 self.ekf.nonlinear_measurement_update(self.sensed_ar_diff[landmark_id], ar_obj.predict_observe, H, R)
     
         # reset things
