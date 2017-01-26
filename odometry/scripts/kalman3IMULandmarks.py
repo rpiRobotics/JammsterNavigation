@@ -22,6 +22,14 @@ class ARTAG_landmark:
         self.z = z
         self.theta_y = theta_y
         
+    def predict_observe(self, robot_state):
+        """ Predict the observation that would be received by the robot if it
+        observed this AR tag at robot_state"""
+        ## IMPORTANT  ASSUME X is robot_state[4], y is robot_state[5], theta is robot_state[6]##
+        r = math.sqrt((self.x-robot_state[4])**2 + (self.y-robot_state[5])**2)
+        theta = math.atan2((self.x-robot_state[4]), (self.y-robot_state[5])) - robot_state[6]
+        return np.array([[r],[theta]])
+        
 class alvar_map:
     def __init__(self):
         self.map = {}
@@ -101,7 +109,7 @@ class ExtendedWMRKalmanFilter:
                         
         self.current_prob_estimate = np.dot(np.dot(self.A, self.current_prob_estimate), np.transpose(self.A)) + self.Q
 
-    def measurement_update(self, measurement_vector, H='null', R = 'null'):
+    def linear_measurement_update(self, measurement_vector, H='null', R = 'null'):
         """ Update Kalman filter if sensing information is received """
         if not H == 'null':
             self.H = H
@@ -110,6 +118,22 @@ class ExtendedWMRKalmanFilter:
             self.R = R
        #--------------------------Observation step-----------------------------
         innovation = measurement_vector - np.dot(self.H, self.current_state_estimate)
+        innovation_covariance = np.dot(np.dot(self.H, self.current_prob_estimate), np.transpose(self.H)) + self.R
+        #-----------------------------Update step-------------------------------
+        kalman_gain = np.dot(np.dot(self.current_prob_estimate, np.transpose(self.H)), np.linalg.inv(innovation_covariance))
+        self.current_state_estimate = self.current_state_estimate + np.dot(kalman_gain, innovation)
+        # We need the size of the matrix so we can make an identity matrix.
+        size = self.current_prob_estimate.shape[0]
+        # eye(n) = nxn identity matrix.
+        self.current_prob_estimate = np.dot((np.eye(size)-np.dot(kalman_gain,self.H)), self.current_prob_estimate)
+
+    def nonlinear_measurement_update(self, measurement_vector, measurement_function, H, R):
+        """ Update Kalman filter if sensing information is received """
+        self.H = H
+        self.R = R
+        
+       #--------------------------Observation step-----------------------------
+        innovation = measurement_vector - measurement_function(self.current_state_estimate)
         innovation_covariance = np.dot(np.dot(self.H, self.current_prob_estimate), np.transpose(self.H)) + self.R
         #-----------------------------Update step-------------------------------
         kalman_gain = np.dot(np.dot(self.current_prob_estimate, np.transpose(self.H)), np.linalg.inv(innovation_covariance))
@@ -174,9 +198,10 @@ class StatePredictionNode:
         rospy.Subscriber("right_voltage_pwm", Int16, self._rightMotorCallback)
         rospy.Subscriber("ar_pose_marker", AlvarMarkers, self._arCallback )
         
-        self.observed_list = []
+        self.imus_observed_list = []
+        self.ar_observed_list = []
         self.sensed_ar_diff = {}  # map from tag_id sensed to array of np.array([dx, dy, dtheta_z])
-        self.landmark_map = {}
+        self.landmark_map = {} # map from id to AR TAG obj
 
         ## ADD PREDEFINED MAPS
         transform = np.zeros([3,1])
@@ -199,7 +224,7 @@ class StatePredictionNode:
             self.vl = 0
             return
             
-        self.observed_list.append('imu1')
+        self.imu_observed_list.append('imu1')
         
     def _imu2Callback(self, data):
         self.vr = -data.angular_velocity.z
@@ -207,7 +232,7 @@ class StatePredictionNode:
             self.vr = 0       
             return
             
-        self.observed_list.append('imu2')
+        self.imu_observed_list.append('imu2')
             
     def _imu3Callback(self, data):
         self.vb = data.angular_velocity.z-.01
@@ -215,7 +240,7 @@ class StatePredictionNode:
             self.vb = 0   
             return
             
-        self.observed_list.append('imu3')
+        self.imu_observed_list.append('imu3')
         
     def _arCallback(self, data):
         for marker in data.markers:
@@ -223,12 +248,11 @@ class StatePredictionNode:
                 tag_frame = 'ar_marker_'+str(marker.id)
                 t = self.listener.getLatestCommonTime(tag_frame, 'base')
                 position, quat = self.listener.lookupTransform(tag_frame, 'base', t)
-                angle = tf.transformations.euler_from_quaternion(quat)
-                self.sensed_ar_diff[marker.id] = np.array([[marker.pose.pose.position.x],\
-                                                         [marker.pose.pose.position.y],\
-                                                         [angle[1]]])
-                print angle
-                self.observed_list.append(marker.id)  # we observed an AR tag!                                     
+                dist = math.sqrt(marker.pose.pose.position.x**2 + marker.pose.pose.position.y**2)
+                angle = math.atan2(marker.pose.pose.position.x, marker.pose.pose.position.y)
+                self.sensed_ar_diff[marker.id] = np.array([[dist], [angle]])
+                self.ar_observed_list.append(marker.id)  # we observed an AR tag!    
+                            
         return
      
        
@@ -258,11 +282,9 @@ class StatePredictionNode:
         
         self.pub.publish(msg)
 
-    def _construct_sensing_update(self):
-        """ Construct the state observation matrix from the list of things observed
-        returns (measurement, H, R)"""
-        if len(self.observed_list) == 0:
-            return([],[],[])
+    def _update_with_imus(self):
+        if len(self.imus_observed_list) == 0:
+            return
         
         # Initalize intermediary variables
         measurement_list = []
@@ -271,43 +293,26 @@ class StatePredictionNode:
         num_states = self.ekf.current_state_estimate.shape[0]
         
         ## CHECK EACH SENSOR
-        if 'imu1' in self.observed_list:
+        if 'imu1' in self.imus_observed_list:
             H_row = np.zeros([1, num_states])
             H_row[0, 0] = 1
             H_list.append(H_row)
             measurement_list.append(self.vl)
             R_list.append(.06)
             
-        if 'imu2' in self.observed_list:
+        if 'imu2' in self.imus_observed_list:
             H_row = np.zeros([1, num_states])
             H_row[0, 1] = 1
             H_list.append(H_row)
             measurement_list.append(self.vr)
             R_list.append(.06)
             
-        if 'imu3' in self.observed_list:
+        if 'imu3' in self.imus_observed_list:
             H_row = np.zeros([1, num_states])
             H_row[0, 3] = 1
             H_list.append(H_row)
             measurement_list.append(self.vb)
             R_list.append(4e-5)
-        
-        # CHECK ALL LANDMARKS
-        for landmark_id in self.landmark_map.keys():
-            if landmark_id in self.observed_list:
-                slam_id = self.landmark_map[landmark_id].slam_id
-                H_block = np.zeros([3, num_states])
-                H_block[:, 4:7] = -np.eye(3)
-                H_block[:, 4+3*slam_id:7+3*slam_id] = np.eye(3)
-                H_list.append(H_block)
-                
-                # measurements
-                measurement_list.append(self.sensed_ar_diff[landmark_id])
-                
-                # should probably do this next part better....
-                R_list.append(4e-5)
-                R_list.append(4e-5)
-                R_list.append(4e-5)
     
         # BUILD H
         H = H_list[0]
@@ -329,15 +334,39 @@ class StatePredictionNode:
             r_index += 1
             
         # reset things
-        self.observed_list = []
+        self.imus_observed_list = []
+        self.ekf.linear_measurement_update(measurement, H, R)
+        
+    def _update_with_landmarks(self):
+        if len(self.ar_observed_list) == 0:
+            return
+        
+        num_states = self.ekf.current_state_estimate.shape[0]
+        
+        # CHECK ALL LANDMARKS
+        for landmark_id in self.landmark_map.keys():
+            if landmark_id in self.ar_observed_list:
+                ar_obj = self.landmark_map[landmark_id] # Contains predicted measurement funciton
+                mx = ar_obj.x
+                my = ar_obj.y
+                x = self.ekf.current_state_estimate[4]
+                y = self.ekf.current_state_estimate[5]
+                dist = self.sensed_ar_diff[landmark_id][0]
+                
+                H = np.array([[-(mx - x)/math.sqrt(dist),  -(my-y)/math.sqrt(dist)],
+                              [(my-y)/(dist), -(mx-x)/(dist)]])
+                              
+                R = np.eye(2) * 4E-3
+                self.ekf.nonlinear_measurement_update(self.sensed_ar_diff[landmark_id], ar_obj.predict_observe, H, R)
+    
+        # reset things
+        self.ar_observed_list = []
         self.sensed_ar_diff = {}
-        return (measurements, H, R)
         
     def _update_ekf(self):
         self.ekf.predict(self.control_voltages)
-        (measurement, H, R) = self._construct_sensing_update()
-        if not H == []:
-            self.ekf.measurement_update(measurement, H, R)
+        self._update_with_imus()
+        self._update_with_landmarks()
         
     def _print(self):
         """ Print info to the screen every once and a while """
