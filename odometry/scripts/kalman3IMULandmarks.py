@@ -9,6 +9,7 @@ from std_msgs.msg import Int16
 import copy
 from tf import TransformListener
 from ar_track_alvar_msgs.msg import AlvarMarkers
+import time
 
 class ARTAG_landmark:
     """ Class used to represent an ARTAG landmark """
@@ -179,7 +180,11 @@ class StatePredictionNode:
 
         ## ADD PREDEFINED MAPS
         transform = np.zeros([3,1])
-        self.landmark_map[0] = ARTAG_landmark(0,1,0,0,0,0)
+        transform[0,0] = .66  # x
+        transform[1,0] = 0    # y
+        transform[2,0] = 0    # theta
+        #(tag_num, slam_id, x, y, z, theta_y, fixed = True)
+        self.landmark_map[0] = ARTAG_landmark(0,1,.66,0,-.7,0)
         self.ekf.add_AR_tag(transform, np.zeros([3,3]))
         
     def _leftMotorCallback(self, data):
@@ -215,7 +220,6 @@ class StatePredictionNode:
     def _arCallback(self, data):
         for marker in data.markers:
             if marker.id in self.landmark_map:
-                self.observed_list.append(marker.id)  # we observed an AR tag!
                 tag_frame = 'ar_marker_'+str(marker.id)
                 t = self.listener.getLatestCommonTime(tag_frame, 'base')
                 position, quat = self.listener.lookupTransform(tag_frame, 'base', t)
@@ -223,7 +227,8 @@ class StatePredictionNode:
                 self.sensed_ar_diff[marker.id] = np.array([[marker.pose.pose.position.x],\
                                                          [marker.pose.pose.position.y],\
                                                          [angle[1]]])
-                                                         
+                print angle
+                self.observed_list.append(marker.id)  # we observed an AR tag!                                     
         return
      
        
@@ -292,8 +297,8 @@ class StatePredictionNode:
             if landmark_id in self.observed_list:
                 slam_id = self.landmark_map[landmark_id].slam_id
                 H_block = np.zeros([3, num_states])
-                H_block[:, 4:7] = np.eye(3)
-                H_block[:, 4+slam_id:7+slam_id] = -np.eye(3)
+                H_block[:, 4:7] = -np.eye(3)
+                H_block[:, 4+3*slam_id:7+3*slam_id] = np.eye(3)
                 H_list.append(H_block)
                 
                 # measurements
@@ -340,7 +345,7 @@ class StatePredictionNode:
         np.set_printoptions(precision=3, suppress=True)
         if self.i%40 == 0:
             self.i = 0
-            print self.ekf.current_state_estimate
+            print self.ekf.current_state_estimate[4:7]
             
     def spin(self):
         r = rospy.Rate(1/self.dt)
