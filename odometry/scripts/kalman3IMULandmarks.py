@@ -27,7 +27,7 @@ class ARTAG_landmark:
         observed this AR tag at robot_state"""
         ## IMPORTANT  ASSUME X is robot_state[4], y is robot_state[5], theta is robot_state[6]##
         r = math.sqrt((self.x-robot_state[4])**2 + (self.y-robot_state[5])**2)
-        theta = math.atan2((self.x-robot_state[4]), (self.y-robot_state[5])) - robot_state[6]
+        theta = math.atan2((self.y-robot_state[5]), (self.x-robot_state[4])) - robot_state[6]
         return np.array([[r],[theta]])
         
 class alvar_map:
@@ -248,7 +248,7 @@ class StatePredictionNode:
                 t = self.listener.getLatestCommonTime(tag_frame, 'base')
                 position, quat = self.listener.lookupTransform(tag_frame, 'base', t)
                 dist = math.sqrt(marker.pose.pose.position.x**2 + marker.pose.pose.position.y**2)
-                angle = math.atan2(marker.pose.pose.position.x, marker.pose.pose.position.y)
+                angle = math.atan2(marker.pose.pose.position.y, marker.pose.pose.position.x)
                 self.sensed_ar_diff[marker.id] = np.array([[dist], [angle]])
                 self.ar_observed_list.append(marker.id)  # we observed an AR tag!    
                             
@@ -346,16 +346,25 @@ class StatePredictionNode:
         for landmark_id in self.landmark_map.keys():
             if landmark_id in self.ar_observed_list:
                 ar_obj = self.landmark_map[landmark_id] # Contains predicted measurement funciton
-                mx = ar_obj.x
-                my = ar_obj.y
                 x = self.ekf.current_state_estimate[4]
                 y = self.ekf.current_state_estimate[5]
-                dist = self.sensed_ar_diff[landmark_id][0]
+                mx = ar_obj.x
+                my = ar_obj.y
+                dist = self.sensed_ar_diff[landmark_id][0]**2
+                theta = self.sensed_ar_diff[landmark_id][1]
                 
                 H = np.zeros([2, self.ekf.current_prob_estimate.shape[0]])
-                H_block = np.array([[-(mx - x)/math.sqrt(dist),  -(my-y)/math.sqrt(dist)],\
-                [(my-y)/(dist), -(mx-x)/(dist)]])
-                H[:,4:6] = H_block[:,:,0]
+                dx = x - mx
+                dy = y - my
+                
+                H_block1 = np.array([[dx[0]/math.sqrt(dist),  dy[0]/math.sqrt(dist), 0],\
+                [-dy[0]/(dist), dx[0]/(dist), -1]])
+                
+                H_block2 = np.array([[-dx[0]/math.sqrt(dist),  -dy[0]/math.sqrt(dist)],\
+                                     [dy[0]/(dist), -dx[0]/(dist)]])
+                                     
+                H[:,4:7] = H_block1[:,:]  # robot state part
+                H[:,7+(ar_obj.slam_id-1)*3:9+(ar_obj.slam_id-1)*3] = H_block2
                  
                 R = np.eye(2)* 4E-3
                 self.ekf.nonlinear_measurement_update(self.sensed_ar_diff[landmark_id], ar_obj.predict_observe, H, R)
