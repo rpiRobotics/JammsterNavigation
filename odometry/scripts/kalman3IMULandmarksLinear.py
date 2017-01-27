@@ -10,16 +10,19 @@ import copy
 from tf import TransformListener
 from ar_track_alvar_msgs.msg import AlvarMarkers
 import time
+import transformations
 
 class ARTAG_landmark:
     """ Class used to represent an ARTAG landmark """
-    def __init__(self, tag_num, slam_id, x, y, z, theta_z, fixed = True):
+    def __init__(self, tag_num, slam_id, x, y, z, theta_x, theta_y, theta_z, fixed = True):
         self.tag_num = tag_num  # number the AR tag encodes
         self.slam_id = slam_id  # position in the state vector
         self.fixed = fixed      # whether or not the tag's position can be updated (AKA SLAM)
         self.x = x
         self.y = y
         self.z = z
+        self.theta_x = theta_x
+        self.theta_y = theta_y
         self.theta_z = theta_z
         
 class ExtendedWMRKalmanFilter:
@@ -44,8 +47,8 @@ class ExtendedWMRKalmanFilter:
         self.k1_r = k1_r
         self.k2_r = k2_r
         self.current_state_estimate = copy.deepcopy(starting_state)
-        self.current_prob_estimate = np.zeros([starting_state.shape[0], starting_state.shape[0]])
-#        self.current_prob_estimate[5,5] = 1
+        #self.current_prob_estimate = np.zeros([starting_state.shape[0], starting_state.shape[0]])
+        self.current_prob_estimate = np.eye(starting_state.shape[0])*.1
         self.dt = dt
         
         self.A = np.zeros([self.current_state_estimate.shape[0], self.current_state_estimate.shape[0]])
@@ -170,8 +173,8 @@ class StatePredictionNode:
         self.landmark_map = {} # map from id to AR TAG obj
 
         ## ADD PREDEFINED MAPS
-        #(tag_num, slam_id, x, y, z, theta_z, fixed = True)
-        self.landmark_map[0] = ARTAG_landmark(0,1,1,0,0,-math.pi/2)
+        #(tag_num, slam_id, x, y, z, theta_x, theta_y, theta_z, fixed = True)
+        self.landmark_map[0] = ARTAG_landmark(0,1,1.25,0,.50,0+math.pi/2, 0, -math.pi+math.pi/2)
         self.ekf.add_AR_tag(self.landmark_map[0], np.zeros([3,3]))
         
         self.br = tf.TransformBroadcaster()
@@ -207,6 +210,24 @@ class StatePredictionNode:
         self.imu_observed_list.append('imu3')
         
     def _arCallback(self, data):
+        for marker in data.markers:
+            if marker.id in self.landmark_map:
+                
+                tag_frame = 'ar_marker_'+str(marker.id)
+                t = self.listener.getLatestCommonTime(tag_frame, 'base')
+                p_tr, q_tr = self.listener.lookupTransform(tag_frame, 'base', t)
+                H_tr = self.listener.fromTranslationRotation(p_tr, q_tr)
+                
+                t = self.listener.getLatestCommonTime(tag_frame+'_ref', 'world')
+                p_ot, q_ot = self.listener.lookupTransform('world', tag_frame+'_ref',  t)
+                H_ot = self.listener.fromTranslationRotation(p_ot, q_ot)
+                
+                H_ot = np.dot(H_ot, H_tr)    
+                angles = transformations.euler_from_matrix(H_ot[0:3, 0:3], axes='sxyz')
+                
+                self.sensed_ar_diff[marker.id] = np.array([[H_ot[0,3]], [H_ot[1,3]], [angles[2]]])
+                self.ar_observed_list.append(marker.id)  # we observed an AR tag!    
+                            
         return
      
        
@@ -292,12 +313,29 @@ class StatePredictionNode:
         self.ekf.linear_measurement_update(measurement, H, R)
         
     def _update_with_landmarks(self):
-        return
+        if len(self.ar_observed_list) == 0:
+            return
+                
+        # CHECK ALL LANDMARKS
+        for landmark_id in self.landmark_map.keys():
+            if landmark_id in self.ar_observed_list:
+                measurement = self.sensed_ar_diff[landmark_id]
+                
+                H = np.zeros([3, self.ekf.current_prob_estimate.shape[0]])
+                H[:, 4:7] = np.eye(3)
+                R = np.eye(3)* 4E-3
+                
+                self.ekf.linear_measurement_update(measurement, H, R)
+    
+        # reset things
+        self.ar_observed_list = []
+        self.sensed_ar_diff = {}
     
     def _publish_tf(self):
         # ROBOT TRANSFORM
-        self.br.sendTransform((self.ekf.current_state_estimate[4], self.ekf.current_state_estimate[5], 0),
-                 tf.transformations.quaternion_from_euler(0, self.ekf.current_state_estimate[6], 0),
+        state = copy.deepcopy(self.ekf.current_state_estimate)
+        self.br.sendTransform((state[4], state[5], 0),
+                 tf.transformations.quaternion_from_euler(0, state[6], 0),
                  rospy.Time.now(),
                  "base",
                  "world")
@@ -305,9 +343,9 @@ class StatePredictionNode:
         for landmark_id in self.landmark_map.keys():
             ar_obj = self.landmark_map[landmark_id]
             self.br.sendTransform((ar_obj.x, ar_obj.y, ar_obj.z),
-                 tf.transformations.quaternion_from_euler(0, 0, ar_obj.theta_z),
+                 tf.transformations.quaternion_from_euler(ar_obj.theta_x, ar_obj.theta_y, ar_obj.theta_z),
                  rospy.Time.now(),
-                 "ar_ref_" + str(ar_obj.slam_id),
+                 "ar_marker_" + str(ar_obj.tag_num) + "_ref",
                  "world")
         return
     
