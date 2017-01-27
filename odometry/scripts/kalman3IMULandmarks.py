@@ -66,6 +66,7 @@ class ExtendedWMRKalmanFilter:
         self.k2_r = k2_r
         self.current_state_estimate = copy.deepcopy(starting_state)
         self.current_prob_estimate = np.zeros([starting_state.shape[0], starting_state.shape[0]])
+#        self.current_prob_estimate[5,5] = 1
         self.dt = dt
         
         self.A = np.zeros([self.current_state_estimate.shape[0], self.current_state_estimate.shape[0]])
@@ -133,6 +134,7 @@ class ExtendedWMRKalmanFilter:
         self.R = R
        #--------------------------Observation step-----------------------------
         innovation = measurement_vector - measurement_function(self.current_state_estimate)
+        #print '*************\nACTUAL', measurement_vector, '\nEXPECTED', measurement_function(self.current_state_estimate), '\n*********************\n'
         innovation_covariance = np.dot(np.dot(self.H, self.current_prob_estimate), np.transpose(self.H)) + self.R
         #-----------------------------Update step-------------------------------
         kalman_gain = np.dot(np.dot(self.current_prob_estimate, np.transpose(self.H)), np.linalg.inv(innovation_covariance))
@@ -141,7 +143,7 @@ class ExtendedWMRKalmanFilter:
         size = self.current_prob_estimate.shape[0]
         # eye(n) = nxn identity matrix.
         self.current_prob_estimate = np.dot((np.eye(size)-np.dot(kalman_gain,self.H)), self.current_prob_estimate)
-
+        #print self.current_state_estimate
 
     def add_AR_tag(self, transform, certainty):
         """ Add an AR tag to the state of the EKF
@@ -178,7 +180,6 @@ class StatePredictionNode:
         Q = np.zeros([7,7])
         Q[0,0] = .01
         Q[1,1] = .01
-        Q[3,3] = .01
         R = np.eye(3) * .001
         starting_state = np.zeros([7,1])
         self.r = .15
@@ -205,10 +206,10 @@ class StatePredictionNode:
         ## ADD PREDEFINED MAPS
         transform = np.zeros([3,1])
         transform[0,0] = .02  # x
-        transform[1,0] = -1.37    # y
+        transform[1,0] = 1.37    # y
         transform[2,0] = 0    # theta
         #(tag_num, slam_id, x, y, z, theta_y, fixed = True)
-        self.landmark_map[0] = ARTAG_landmark(0,1,.02,-1.37,0,0)
+        self.landmark_map[0] = ARTAG_landmark(0,1,.02,1.37,0,0)
         self.ekf.add_AR_tag(transform, np.zeros([3,3]))
         
     def _leftMotorCallback(self, data):
@@ -246,9 +247,9 @@ class StatePredictionNode:
             if marker.id in self.landmark_map:
                 tag_frame = 'ar_marker_'+str(marker.id)
                 t = self.listener.getLatestCommonTime(tag_frame, 'base')
-                position, quat = self.listener.lookupTransform(tag_frame, 'base', t)
-                dist = math.sqrt(marker.pose.pose.position.x**2 + marker.pose.pose.position.y**2)
-                angle = math.atan2(marker.pose.pose.position.y, marker.pose.pose.position.x)
+                position, quat = self.listener.lookupTransform('base', tag_frame,  t)
+                dist = math.sqrt(position[0]**2 + position[1]**2)
+                angle = math.atan2(position[1], position[0])
                 self.sensed_ar_diff[marker.id] = np.array([[dist], [angle]])
                 self.ar_observed_list.append(marker.id)  # we observed an AR tag!    
                             
