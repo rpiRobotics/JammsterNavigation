@@ -204,11 +204,11 @@ class StatePredictionNode:
 
         ## ADD PREDEFINED MAPS
         transform = np.zeros([3,1])
-        transform[0,0] = .66  # x
-        transform[1,0] = 0    # y
+        transform[0,0] = .02  # x
+        transform[1,0] = -1.37    # y
         transform[2,0] = 0    # theta
         #(tag_num, slam_id, x, y, z, theta_y, fixed = True)
-        self.landmark_map[0] = ARTAG_landmark(0,1,.66,0,-.7,0)
+        self.landmark_map[0] = ARTAG_landmark(0,1,.02,-1.37,0,0)
         self.ekf.add_AR_tag(transform, np.zeros([3,3]))
         
     def _leftMotorCallback(self, data):
