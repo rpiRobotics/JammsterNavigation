@@ -48,7 +48,7 @@ class ExtendedWMRKalmanFilter:
         self.k2_r = k2_r
         self.current_state_estimate = copy.deepcopy(starting_state)
         #self.current_prob_estimate = np.zeros([starting_state.shape[0], starting_state.shape[0]])
-        self.current_prob_estimate = np.eye(starting_state.shape[0])*.1
+        self.current_prob_estimate = np.eye(starting_state.shape[0])*.4
         self.dt = dt
         
         self.A = np.zeros([self.current_state_estimate.shape[0], self.current_state_estimate.shape[0]])
@@ -174,8 +174,14 @@ class StatePredictionNode:
 
         ## ADD PREDEFINED MAPS
         #(tag_num, slam_id, x, y, z, theta_x, theta_y, theta_z, fixed = True)
-        self.landmark_map[0] = ARTAG_landmark(0,1,1.25,0,.50,0+math.pi/2, 0, -math.pi+math.pi/2)
+        self.landmark_map[0] = ARTAG_landmark(0,1,0,1.37,.10,math.pi/2, 0, 0)
+        self.landmark_map[1] = ARTAG_landmark(1,2,-1.74,0,.15,math.pi/2, 0, math.pi/2)
+        self.landmark_map[3] = ARTAG_landmark(3,3,2.84,.15,.32,math.pi/2, 0, -math.pi/2)
+        self.landmark_map[2] = ARTAG_landmark(2,4,1.37,1.88,.06,math.pi/2, 0, 0)
         self.ekf.add_AR_tag(self.landmark_map[0], np.zeros([3,3]))
+        self.ekf.add_AR_tag(self.landmark_map[1], np.zeros([3,3]))
+        self.ekf.add_AR_tag(self.landmark_map[2], np.zeros([3,3]))
+        self.ekf.add_AR_tag(self.landmark_map[3], np.zeros([3,3]))
         
         self.br = tf.TransformBroadcaster()
         
@@ -335,7 +341,7 @@ class StatePredictionNode:
         # ROBOT TRANSFORM
         state = copy.deepcopy(self.ekf.current_state_estimate)
         self.br.sendTransform((state[4], state[5], 0),
-                 tf.transformations.quaternion_from_euler(0, state[6], 0),
+                 tf.transformations.quaternion_from_euler(0, 0, state[6]),
                  rospy.Time.now(),
                  "base",
                  "world")
