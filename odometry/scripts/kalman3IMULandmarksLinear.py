@@ -194,7 +194,11 @@ class StatePredictionNode:
         self.ekf.add_AR_tag(self.landmark_map[2], np.zeros([3,3]))
         self.ekf.add_AR_tag(self.landmark_map[3], np.zeros([3,3]))        
         self.br = tf.TransformBroadcaster()
-        
+
+        ## FILE WRITING INFO
+        self.f = open('ar_data1.csv', 'w+')
+        self.transform_written = False
+            
     def _leftMotorCallback(self, data):
         self.control_voltages[0] = data.data
         
@@ -243,6 +247,12 @@ class StatePredictionNode:
                 
                 self.sensed_ar_diff[marker.id] = np.array([[H_ot[0,3]], [H_ot[1,3]], [angles[2]]])
                 self.ar_observed_list.append(marker.id)  # we observed an AR tag!    
+
+                if not self.transform_written:
+                    t = self.listener.getLatestCommonTime(tag_frame, '/right_hand_camera')
+                    p_ct, q_ct = self.listener.lookupTransform('/right_hand_camera', tag_frame,  t)
+                    np.savetxt(self.f, (np.array([p_ct[0], p_ct[1], p_ct[2], q_ct[0], q_ct[1], q_ct[2], q_ct[3]])), newline="\n")
+                    self.transform_written = True
                             
         return
      
@@ -342,7 +352,9 @@ class StatePredictionNode:
                 R = np.eye(3)* 4E-3
                 
                 self.ekf.linear_measurement_update(measurement, H, R)
-    
+                if self.transform_written:
+                    np.savetxt(self.f, np.transpose(measurement), newline="\n")
+
         # reset things
         self.ar_observed_list = []
         self.sensed_ar_diff = {}
