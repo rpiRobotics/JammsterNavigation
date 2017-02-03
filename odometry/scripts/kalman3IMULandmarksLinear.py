@@ -71,6 +71,17 @@ class ExtendedWMRKalmanFilter:
         vl = u[0,0]
         vr = u[1,0]
         
+        # Vary noise with input voltage
+        if vl == 0:
+            self.Q[0,0] = 0
+        else:
+            self.Q[0,0] = vl*.01/3000+.005
+
+        if vr == 0:
+            self.Q[1,1] = 0
+        else:
+            self.Q[1,1] = vr*.01/3000+.005
+
         ## TRANSITION ESTIMATE
         self.current_state_estimate[0] += self.dt*(self.k2_l*dtheta_l + self.k1_l*vl)
         self.current_state_estimate[1] += self.dt*(self.k2_r*dtheta_r + self.k1_r*vr)
@@ -181,8 +192,7 @@ class StatePredictionNode:
         self.ekf.add_AR_tag(self.landmark_map[0], np.zeros([3,3]))
         self.ekf.add_AR_tag(self.landmark_map[1], np.zeros([3,3]))
         self.ekf.add_AR_tag(self.landmark_map[2], np.zeros([3,3]))
-        self.ekf.add_AR_tag(self.landmark_map[3], np.zeros([3,3]))
-        
+        self.ekf.add_AR_tag(self.landmark_map[3], np.zeros([3,3]))        
         self.br = tf.TransformBroadcaster()
         
     def _leftMotorCallback(self, data):
