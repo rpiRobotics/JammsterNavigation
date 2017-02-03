@@ -22,9 +22,12 @@ class GoToGoal:
         rospy.Subscriber("/goal", Pose, self._goalCallback)
         self.pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
         
-        self.my_pid = PID(P=-2.0, I=0.0, D=0.0, Derivator=0, Integrator=0, Integrator_max=2, Integrator_min=-2)
+        self.my_pid = PID(P=2.0, I=0.0, D=0.0, Derivator=0, Integrator=0, Integrator_max=2, Integrator_min=-2)
         self.v = 0
         self.w = 0
+
+        self.v_max = .2
+        self.w_max = .2
         
         self.current_x = 0
         self.current_y = 0
@@ -69,8 +72,18 @@ class GoToGoal:
                 self.w = 0
             else:
                 self.v = .0
-                
-            print "%.2f, %.2f, %.2f" %(self.my_pid.getError(), self.desired_bearing, math.sqrt((self.current_x - self.desired_x)**2 + (self.current_y - self.desired_y)**2))
+
+            if self.v > self.v_max:
+                self.v = self.v_max
+            if self.v < -self.v_max:
+                self.v = -self.v_max
+
+            if self.w > self.w_max:
+                self.w = self.w_max
+            if self.w < -self.w_max:
+                self.w = -self.w_max                
+
+            print "%.2f, %.2f, %.2f" %(self.my_pid.getError(), self.desired_bearing, self.current_bearing)
             msg = Twist()
             msg.linear.x = self.v
             msg.angular.z = self.w

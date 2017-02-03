@@ -12,6 +12,9 @@ from ar_track_alvar_msgs.msg import AlvarMarkers
 import time
 import transformations
 
+def deltaAngle(x, y):
+    return math.atan2(math.sin(x-y), math.cos(x-y))
+
 class ARTAG_landmark:
     """ Class used to represent an ARTAG landmark """
     def __init__(self, tag_num, slam_id, x, y, z, theta_x, theta_y, theta_z, fixed = True):
@@ -48,7 +51,8 @@ class ExtendedWMRKalmanFilter:
         self.k2_r = k2_r
         self.current_state_estimate = copy.deepcopy(starting_state)
         #self.current_prob_estimate = np.zeros([starting_state.shape[0], starting_state.shape[0]])
-        self.current_prob_estimate = np.eye(starting_state.shape[0])*.4
+        self.current_prob_estimate = np.zeros([starting_state.shape[0], starting_state.shape[0]])
+        self.current_prob_estimate[4:7, 4:7] = np.eye(3)
         self.dt = dt
         
         self.A = np.zeros([self.current_state_estimate.shape[0], self.current_state_estimate.shape[0]])
@@ -72,15 +76,15 @@ class ExtendedWMRKalmanFilter:
         vr = u[1,0]
         
         # Vary noise with input voltage
-        if vl == 0:
-            self.Q[0,0] = 0
+        if vl == 0 and abs(self.current_state_estimate[0,0]) < .001:
+            self.Q[0,0] = .0001
         else:
-            self.Q[0,0] = vl*.01/3000+.005
+            self.Q[0,0] = abs(vl)*.03/3000+.03
 
-        if vr == 0:
-            self.Q[1,1] = 0
+        if vr == 0 and abs(self.current_state_estimate[1,0]) < .001:
+            self.Q[1,1] = .0001
         else:
-            self.Q[1,1] = vr*.01/3000+.005
+            self.Q[1,1] = abs(vr)*.03/3000+.03
 
         ## TRANSITION ESTIMATE
         self.current_state_estimate[0] += self.dt*(self.k2_l*dtheta_l + self.k1_l*vl)
@@ -103,7 +107,7 @@ class ExtendedWMRKalmanFilter:
                         
         self.current_prob_estimate = np.dot(np.dot(self.A, self.current_prob_estimate), np.transpose(self.A)) + self.Q
 
-    def linear_measurement_update(self, measurement_vector, H='null', R = 'null'):
+    def linear_measurement_update(self, measurement_vector, H='null', R = 'null', angle=False):
         """ Update Kalman filter if sensing information is received """
         if not H == 'null':
             self.H = H
@@ -112,6 +116,10 @@ class ExtendedWMRKalmanFilter:
             self.R = R
        #--------------------------Observation step-----------------------------
         innovation = measurement_vector - np.dot(self.H, self.current_state_estimate)
+        # deal with special angular case
+        if angle:
+            innovation[2] = deltaAngle(measurement_vector[2], np.dot(self.H, self.current_state_estimate)[2]) 
+
         innovation_covariance = np.dot(np.dot(self.H, self.current_prob_estimate), np.transpose(self.H)) + self.R
         #-----------------------------Update step-------------------------------
         kalman_gain = np.dot(np.dot(self.current_prob_estimate, np.transpose(self.H)), np.linalg.inv(innovation_covariance))
@@ -148,7 +156,7 @@ class StatePredictionNode:
     def __init__(self):
 
         rospy.init_node('odometry', anonymous=True)
-        self.dt = .02
+        self.dt = .017
         self.control_voltages = np.zeros([2,1])
         self.vl = 0     # left wheel velocity
         self.vr = 0     # right wheel velocity
@@ -158,8 +166,8 @@ class StatePredictionNode:
                                     # we can't update base velocity all the time
 
         Q = np.zeros([7,7])
-        Q[0,0] = .01
-        Q[1,1] = .01
+        Q[0,0] = 1*self.dt
+        Q[1,1] = 1*self.dt
         R = np.eye(3) * .001
         starting_state = np.zeros([7,1])
         self.r = .15
@@ -211,7 +219,7 @@ class StatePredictionNode:
             self.vl = 0
             return
             
-        self.imu_observed_list.append('imu1')
+        self.imus_observed_list.append('imu1')
         
     def _imu2Callback(self, data):
         self.vr = -data.angular_velocity.z
@@ -219,7 +227,7 @@ class StatePredictionNode:
             self.vr = 0       
             return
             
-        self.imu_observed_list.append('imu2')
+        self.imus_observed_list.append('imu2')
             
     def _imu3Callback(self, data):
         self.vb = data.angular_velocity.z-.01
@@ -227,7 +235,7 @@ class StatePredictionNode:
             self.vb = 0   
             return
             
-        self.imu_observed_list.append('imu3')
+        self.imus_observed_list.append('imu3')
         
     def _arCallback(self, data):
         for marker in data.markers:
@@ -244,16 +252,9 @@ class StatePredictionNode:
                 
                 H_ot = np.dot(H_ot, H_tr)    
                 angles = transformations.euler_from_matrix(H_ot[0:3, 0:3], axes='sxyz')
-                
                 self.sensed_ar_diff[marker.id] = np.array([[H_ot[0,3]], [H_ot[1,3]], [angles[2]]])
                 self.ar_observed_list.append(marker.id)  # we observed an AR tag!    
 
-                if not self.transform_written:
-                    t = self.listener.getLatestCommonTime(tag_frame, '/right_hand_camera')
-                    p_ct, q_ct = self.listener.lookupTransform('/right_hand_camera', tag_frame,  t)
-                    np.savetxt(self.f, (np.array([p_ct[0], p_ct[1], p_ct[2], q_ct[0], q_ct[1], q_ct[2], q_ct[3]])), newline="\n")
-                    self.transform_written = True
-                            
         return
      
        
@@ -261,25 +262,22 @@ class StatePredictionNode:
         state = copy.deepcopy(self.ekf.current_state_estimate)
             
         ## BUILD AND SEND MSG
-        quaternion = tf.transformations.quaternion_from_euler(0, 0, state[4])
+        quaternion = tf.transformations.quaternion_from_euler(0, 0, state[6])
         
         msg = Odometry()
         msg.header.stamp = rospy.Time.now()
-        msg.pose.pose.position.x = state[2]
-        msg.pose.pose.position.y = state[3]
+        msg.pose.pose.position.x = state[4]
+        msg.pose.pose.position.y = state[5]
         msg.pose.pose.position.z = 0
         msg.pose.pose.orientation.x = quaternion[0]
         msg.pose.pose.orientation.y = quaternion[1]
         msg.pose.pose.orientation.z = quaternion[2]
         msg.pose.pose.orientation.w = quaternion[3]            
         
-        msg.twist.twist.linear.x = (self.r/2)*(state[0]\
-            + state[1])*math.cos(state[4])
-        msg.twist.twist.linear.y = (self.r/2)*(state[0]\
-            + state[1])*math.sin(state[4])
+        msg.twist.twist.linear.x = state[2]*math.cos(state[6])
+        msg.twist.twist.linear.y = state[2]*math.sin(state[6])
         msg.twist.twist.linear.z = 0
-        msg.twist.twist.angular.z = (self.r/self.l)*(state[1]\
-            - state[0])
+        msg.twist.twist.angular.z = state[3]
         
         self.pub.publish(msg)
 
@@ -313,7 +311,7 @@ class StatePredictionNode:
             H_row[0, 3] = 1
             H_list.append(H_row)
             measurement_list.append(self.vb)
-            R_list.append(4e-5)
+            R_list.append(4e-6)
     
         # BUILD H
         H = H_list[0]
@@ -336,7 +334,7 @@ class StatePredictionNode:
             
         # reset things
         self.imus_observed_list = []
-        self.ekf.linear_measurement_update(measurement, H, R)
+        self.ekf.linear_measurement_update(measurements, H, R)
         
     def _update_with_landmarks(self):
         if len(self.ar_observed_list) == 0:
@@ -349,11 +347,12 @@ class StatePredictionNode:
                 
                 H = np.zeros([3, self.ekf.current_prob_estimate.shape[0]])
                 H[:, 4:7] = np.eye(3)
-                R = np.eye(3)* 4E-3
+
+                dist = np.linalg.norm(measurement[0:2])
+                R = np.eye(3) * dist**3 * .1
                 
-                self.ekf.linear_measurement_update(measurement, H, R)
-                if self.transform_written:
-                    np.savetxt(self.f, np.transpose(measurement), newline="\n")
+                self.ekf.linear_measurement_update(measurement, H, R, True)
+                #print measurement
 
         # reset things
         self.ar_observed_list = []
