@@ -14,6 +14,9 @@ from geometry_msgs.msg import Twist
 import tf
 from pid import PID
 
+def deltaAngle(x, y):
+    return math.atan2(math.sin(x-y), math.cos(x-y))
+
 class GoToGoal:
     """ Simple go to point controller.  Does nothing for obstacle avoidance"""
     def __init__(self):
@@ -22,7 +25,7 @@ class GoToGoal:
         rospy.Subscriber("/goal", Pose, self._goalCallback)
         self.pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
         
-        self.my_pid = PID(P=2.0, I=0.0, D=0.0, Derivator=0, Integrator=0, Integrator_max=2, Integrator_min=-2)
+        self.w_pid = PID(P=2.0, I=0.0, D=0.0, Derivator=0, Integrator=0, Integrator_max=2, Integrator_min=-2)
         self.v = 0
         self.w = 0
 
@@ -43,6 +46,9 @@ class GoToGoal:
         print "Got new goal"
         self.desired_x = data.position.x
         self.desired_y = data.position.y
+        quat = (data.orientation.x, data.orientation.y, data.orientation.z, data.orientation.w)
+        euler = tf.transformations.euler_from_quaternion(quat)
+        self.desired_bearing = euler[2]
 
     def _odomCallback(self, data):
         quat = (data.pose.pose.orientation.x, data.pose.pose.orientation.y, data.pose.pose.orientation.z, data.pose.pose.orientation.w)
@@ -51,8 +57,8 @@ class GoToGoal:
         
         self.current_x = data.pose.pose.position.x
         self.current_y = data.pose.pose.position.y
-        self.desired_bearing = math.atan2(self.desired_y-self.current_y, self.desired_x-self.current_x)
-        if math.sqrt((self.current_x - self.desired_x)**2 + (self.current_y - self.desired_y)**2) > .2:
+
+        if math.sqrt((self.current_x - self.desired_x)**2 + (self.current_y - self.desired_y)**2) > .4:
             self.close_enough = False
         else:
             self.close_enough = True            
@@ -61,17 +67,36 @@ class GoToGoal:
     def spin(self):
         r = rospy.Rate(10)
         while not rospy.is_shutdown():
-            self.my_pid.setPoint(self.desired_bearing)
-            self.w=self.my_pid.update(self.current_bearing)
-            
+            # STOP CASE
             if self.desired_x == 0 and self.desired_y ==0:
+                print "STOP MODE"
                 self.v = 0
                 self.w = 0 
+
+            # CLOSE ENOUGH CASE
             elif self.close_enough:
+                print "CLOSE ENOUGH MODE"
                 self.v = 0
-                self.w = 0
+                self.w_pid.setPoint(self.desired_bearing)
+                self.w = self.w_pid.update(self.current_bearing)
+        
+            # MOVE TO POINT CASE
             else:
-                self.v = .0
+                d_angle = math.atan2((self.desired_y - self.current_y), (self.desired_x - self.current_x))
+                # TURN TOWARDS GOAL
+                if abs(deltaAngle(d_angle,self.current_bearing)) > .25:
+                    print "TURN TOWARDS GOAL MODE"
+                    print abs(d_angle - self.current_bearing)
+                    self.v = 0
+                    self.w_pid.setPoint(d_angle)
+                    self.w = self.w_pid.update(self.current_bearing)
+
+                # GO TOWARDS GOAL
+                else:
+                    print "GO TOWARDS GOAL MODE"
+                    self.w = 0
+                    self.v = .2
+
 
             if self.v > self.v_max:
                 self.v = self.v_max
@@ -83,7 +108,7 @@ class GoToGoal:
             if self.w < -self.w_max:
                 self.w = -self.w_max                
 
-            print "%.2f, %.2f, %.2f" %(self.my_pid.getError(), self.desired_bearing, self.current_bearing)
+            print "%.2f, %.2f, %.2f" %(self.w_pid.getError(), self.desired_bearing, self.current_bearing)
             msg = Twist()
             msg.linear.x = self.v
             msg.angular.z = self.w
