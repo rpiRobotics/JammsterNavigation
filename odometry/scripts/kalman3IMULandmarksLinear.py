@@ -77,13 +77,16 @@ class ExtendedWMRKalmanFilter:
         vr = u[1,0]
         
         # Vary noise with input voltage
-        if vl == 0 and abs(self.current_state_estimate[0,0]) < .001:
-            self.Q[0,0] = .0001
+        if vl == 0 and abs(self.current_state_estimate[0,0]) < .03:
+            self.Q[0,0] = .0000001
+            dtheta_l = 0
+
         else:
             self.Q[0,0] = abs(vl)*.03/3000+.03
 
-        if vr == 0 and abs(self.current_state_estimate[1,0]) < .001:
-            self.Q[1,1] = .0001
+        if vr == 0 and abs(self.current_state_estimate[1,0]) < .03:
+            self.Q[1,1] = .0000001
+            dtheta_r = 0
         else:
             self.Q[1,1] = abs(vr)*.03/3000+.03
 
@@ -125,6 +128,7 @@ class ExtendedWMRKalmanFilter:
         #-----------------------------Update step-------------------------------
         kalman_gain = np.dot(np.dot(self.current_prob_estimate, np.transpose(self.H)), np.linalg.inv(innovation_covariance))
         self.current_state_estimate = self.current_state_estimate + np.dot(kalman_gain, innovation)
+
         # We need the size of the matrix so we can make an identity matrix.
         size = self.current_prob_estimate.shape[0]
         # eye(n) = nxn identity matrix.
@@ -178,6 +182,7 @@ class StatePredictionNode:
 
 
         self.i = 0 # print index
+        self.j = 0 # move camera index
 
         self.pub = rospy.Publisher('odometry', Odometry, queue_size=1)
         rospy.Subscriber("/imu1", Imu, self._imu1Callback)
@@ -255,6 +260,10 @@ class StatePredictionNode:
         self.imus_observed_list.append('imu3')
         
     def _arCallback(self, data):
+        if abs(self.r_limb.joint_velocity('right_w0')) > .05:
+            print "WRIST MOVING TOO FAST"
+            return 
+
         for marker in data.markers:
             if marker.id in self.landmark_map:
                 
@@ -262,6 +271,10 @@ class StatePredictionNode:
                 t = self.listener.getLatestCommonTime(tag_frame, 'base')
                 p_tr, q_tr = self.listener.lookupTransform(tag_frame, 'base', t)
                 H_tr = self.listener.fromTranslationRotation(p_tr, q_tr)
+                
+                # IGNORE READING IF IT IS TOO FAR AWAY
+                if np.linalg.norm(p_tr) > 2.5:
+                    return
                 
                 t = self.listener.getLatestCommonTime(tag_frame+'_ref', 'world')
                 p_ot, q_ot = self.listener.lookupTransform('world', tag_frame+'_ref',  t)
@@ -412,18 +425,23 @@ class StatePredictionNode:
         min_dist = 9999
         best_angle = 0
         for landmark_id in self.landmark_map:    
+            if not landmark_id == 0:
+                continue
+
             landmark = self.landmark_map[landmark_id]
-            dist = math.sqrt((self.ekf.current_state_estimate[4] - landmark.x)**2 + (self.ekf.current_state_estimate[5] - landmark.y)**2)
-            angle = math.atan2(self.ekf.current_state_estimate[5] - landmark.y, self.ekf.current_state_estimate[4] - landmark.x) - self.ekf.current_state_estimate[6]
-            
+            dist = math.sqrt((-self.ekf.current_state_estimate[4] + landmark.x)**2 + (-self.ekf.current_state_estimate[5] - landmark.y)**2)
+            angle =deltaAngle(self.ekf.current_state_estimate[6], math.atan2(-self.ekf.current_state_estimate[5] + landmark.y, -self.ekf.current_state_estimate[4]))
             if dist < min_dist and abs(angle) < math.pi/2+.5:
-                print dist,angle
                 min_dist = dist
                 best_angle = angle
-                
-        baxter_angles = self.r_angle_default
-        baxter_angles['right_w0'] = best_angle
-        self.r_limb.move_to_joint_positions(baxter_angles)
+
+        self.j+=1
+        if self.j%10 ==0:
+            self.j = 0                
+
+            baxter_angles = self.r_angle_default
+            baxter_angles['right_w0'] = best_angle
+            #self.r_limb.set_joint_positions(baxter_angles)
         
     def spin(self):
         r = rospy.Rate(1/self.dt)
@@ -432,7 +450,6 @@ class StatePredictionNode:
             self._update_ekf()
             self._print()
             self._publish_odom()
-            self._move_arm()
             r.sleep()
 
 my_node = StatePredictionNode()
