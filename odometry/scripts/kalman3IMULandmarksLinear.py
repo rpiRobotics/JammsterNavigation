@@ -11,6 +11,7 @@ from tf import TransformListener
 from ar_track_alvar_msgs.msg import AlvarMarkers
 import time
 import transformations
+from sensor_msgs.msg import LaserScan
 
 def deltaAngle(x, y):
     return math.atan2(math.sin(x-y), math.cos(x-y))
@@ -178,13 +179,8 @@ class StatePredictionNode:
 
         self.i = 0 # print index
 
-        self.pub = rospy.Publisher('odometry', Odometry, queue_size=1)
-        rospy.Subscriber("/imu1", Imu, self._imu1Callback)
-        rospy.Subscriber("/imu2", Imu, self._imu2Callback)
-        rospy.Subscriber("/imu3", Imu, self._imu3Callback)
-        rospy.Subscriber("left_voltage_pwm", Int16, self._leftMotorCallback) 
-        rospy.Subscriber("right_voltage_pwm", Int16, self._rightMotorCallback)
-        rospy.Subscriber("ar_pose_marker", AlvarMarkers, self._arCallback )
+        
+        self.last_time = []
         
         self.imus_observed_list = []
         self.ar_observed_list = []
@@ -207,6 +203,18 @@ class StatePredictionNode:
         self.f = open('ar_data1.csv', 'w+')
         self.transform_written = False
             
+        self.pub = rospy.Publisher('odometry', Odometry, queue_size=1)
+        rospy.Subscriber("/imu1", Imu, self._imu1Callback)
+        rospy.Subscriber("/imu2", Imu, self._imu2Callback)
+        rospy.Subscriber("/imu3", Imu, self._imu3Callback)
+        rospy.Subscriber("left_voltage_pwm", Int16, self._leftMotorCallback) 
+        rospy.Subscriber("right_voltage_pwm", Int16, self._rightMotorCallback)
+        rospy.Subscriber("ar_pose_marker", AlvarMarkers, self._arCallback )
+        rospy.Subscriber("scan", LaserScan, self._scanCallback )
+            
+    def _scanCallback(self, data):
+        self.last_time = data.header.stamp            
+            
     def _leftMotorCallback(self, data):
         self.control_voltages[0] = data.data
         
@@ -214,7 +222,7 @@ class StatePredictionNode:
         self.control_voltages[1] = data.data
         
     def _imu1Callback(self, data):
-        self.vl = -data.angular_velocity.z
+        self.vl = -data.angular_velocity.x
         if abs(self.vl) < .1:
             self.vl = 0
             return
@@ -222,7 +230,7 @@ class StatePredictionNode:
         self.imus_observed_list.append('imu1')
         
     def _imu2Callback(self, data):
-        self.vr = -data.angular_velocity.z
+        self.vr = -data.angular_velocity.x
         if abs(self.vr) < .1:
             self.vr = 0       
             return
@@ -360,20 +368,24 @@ class StatePredictionNode:
     
     def _publish_tf(self):
         # ROBOT TRANSFORM
+        if self.last_time == []:
+            return
+        
         state = copy.deepcopy(self.ekf.current_state_estimate)
         self.br.sendTransform((state[4], state[5], 0),
                  tf.transformations.quaternion_from_euler(0, 0, state[6]),
-                 rospy.Time.now(),
-                 "base",
-                 "world")
+                 self.last_time,
+                 "base_link",
+                 "odom")
                  
+        self.br.sendTransform((0, 0, .4), tf.transformations.quaternion_from_euler(0, 0, 0),self.last_time,"/laser", "/base_link")                 
         for landmark_id in self.landmark_map.keys():
             ar_obj = self.landmark_map[landmark_id]
             self.br.sendTransform((ar_obj.x, ar_obj.y, ar_obj.z),
                  tf.transformations.quaternion_from_euler(ar_obj.theta_x, ar_obj.theta_y, ar_obj.theta_z),
-                 rospy.Time.now(),
+                 self.last_time,
                  "ar_marker_" + str(ar_obj.tag_num) + "_ref",
-                 "world")
+                 "odom")
         return
     
     def _update_ekf(self):
