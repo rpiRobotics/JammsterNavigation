@@ -9,11 +9,12 @@ from std_msgs.msg import Int16
 import copy
 from tf import TransformListener
 from ar_track_alvar_msgs.msg import AlvarMarkers
-import time
 import transformations
 from sensor_msgs.msg import LaserScan
+import baxter_interface
 
 def deltaAngle(x, y):
+    """ Return the smallest distance between two angles """
     return math.atan2(math.sin(x-y), math.cos(x-y))
 
 class ARTAG_landmark:
@@ -198,6 +199,22 @@ class StatePredictionNode:
         self.ekf.add_AR_tag(self.landmark_map[2], np.zeros([3,3]))
         self.ekf.add_AR_tag(self.landmark_map[3], np.zeros([3,3]))        
         self.br = tf.TransformBroadcaster()
+        
+        ## ARM CONTROL
+        self.l_limb = baxter_interface.Limb('left')
+        self.l_angle_default = {'left_w0': -0.1227184630308331, 'left_w1': 1.670888573204187,\
+        'left_w2': -0.1250194342126612, 'left_e0': 0.05368932757598948,\
+        'left_e1': 0.052155346788104066, 'left_s0': -0.7516505860638527,\
+        'left_s1': -1.0791554842773885}
+        
+        self.r_limb = baxter_interface.Limb('right')
+        self.r_angle_default ={'right_s0': 0.6845389265938658, 'right_s1': -1.1224904415351515,\
+        'right_w0': -0.22281070944035636, 'right_w1': -1.4864273834609658,\
+        'right_w2': 0.09510680884889565, 'right_e0': -0.28838838812245776,\
+        'right_e1': 2.5548450022231566}
+        
+        self.r_limb.move_to_joint_positions(self.r_angle_default)
+        self.l_limb.move_to_joint_positions(self.l_angle_default)
 
         ## FILE WRITING INFO
         self.f = open('ar_data1.csv', 'w+')
@@ -223,7 +240,7 @@ class StatePredictionNode:
         
     def _imu1Callback(self, data):
         self.vl = -data.angular_velocity.x
-        if abs(self.vl) < .1:
+        if abs(self.vl) < .05:
             self.vl = 0
             return
             
@@ -231,7 +248,7 @@ class StatePredictionNode:
         
     def _imu2Callback(self, data):
         self.vr = -data.angular_velocity.x
-        if abs(self.vr) < .1:
+        if abs(self.vr) < .05:
             self.vr = 0       
             return
             
@@ -401,6 +418,25 @@ class StatePredictionNode:
             self.i = 0
             print self.ekf.current_state_estimate[4:7]
             
+    def _move_arm(self):
+        """ Position baxter camera to best find landmarks """
+        # IDENTIFY CLOSEST LANDMARK
+        min_dist = 9999
+        best_angle = 0
+        for landmark_id in self.landmark_map:    
+            landmark = self.landmark_map[landmark_id]
+            dist = math.sqrt((self.ekf.current_state_estimate[4] - landmark.x)**2 + (self.ekf.current_state_estimate[5] - landmark.y)**2)
+            angle = math.atan2(self.ekf.current_state_estimate[5] - landmark.y, self.ekf.current_state_estimate[4] - landmark.x) - self.ekf.current_state_estimate[6]
+            
+            if dist < min_dist and abs(angle) < math.pi/2+.5:
+                print dist,angle
+                min_dist = dist
+                best_angle = angle
+                
+        baxter_angles = self.r_angle_default
+        baxter_angles['right_w0'] = best_angle
+        self.r_limb.move_to_joint_positions(baxter_angles)
+        
     def spin(self):
         r = rospy.Rate(1/self.dt)
         while not rospy.is_shutdown():
@@ -408,6 +444,7 @@ class StatePredictionNode:
             self._update_ekf()
             self._print()
             self._publish_odom()
+            self._move_arm()
             r.sleep()
 
 my_node = StatePredictionNode()
