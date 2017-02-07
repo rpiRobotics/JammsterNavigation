@@ -231,16 +231,16 @@ class StatePredictionNode:
         self.control_voltages[1] = data.data
         
     def _imu1Callback(self, data):
-        self.vl = -data.angular_velocity.z
-        if abs(self.vl) < .1:
+        self.vl = -data.angular_velocity.x
+        if abs(self.vl) < .05:
             self.vl = 0
             return
             
         self.imus_observed_list.append('imu1')
         
     def _imu2Callback(self, data):
-        self.vr = -data.angular_velocity.z
-        if abs(self.vr) < .1:
+        self.vr = -data.angular_velocity.x
+        if abs(self.vr) < .05:
             self.vr = 0       
             return
             
