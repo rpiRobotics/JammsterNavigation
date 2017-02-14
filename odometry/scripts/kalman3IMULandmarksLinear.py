@@ -408,7 +408,9 @@ class StatePredictionNode:
                  "base_link",
                  "odom")
                  
-        self.br.sendTransform((0, 0, .4), tf.transformations.quaternion_from_euler(0, 0, 0),self.last_time,"/laser", "/base_link")                 
+        self.br.sendTransform((0, 0, .1), tf.transformations.quaternion_from_euler(0, 0, 0),self.last_time,"/laser", "/base_link")                 
+        self.br.sendTransform((0, 0, 0), tf.transformations.quaternion_from_euler(0, 0, 0),self.last_time,"world", "odom")                 
+        self.br.sendTransform((0, 0, 0), tf.transformations.quaternion_from_euler(0, 0, 0),self.last_time,"base", "base_link")                 
         for landmark_id in self.landmark_map.keys():
             ar_obj = self.landmark_map[landmark_id]
             self.br.sendTransform((ar_obj.x, ar_obj.y, ar_obj.z),
