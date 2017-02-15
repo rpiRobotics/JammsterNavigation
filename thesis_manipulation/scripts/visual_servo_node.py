@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python
 """
 Created on Tue Feb 14 10:56:59 2017
 
@@ -121,7 +121,7 @@ class VisualServoNode:
         angles['right_e0']=1.2755050251267215
         angles['right_e1']=2.5648158773444116
         angles['right_w0']=-0.4306651061988299
-        angles['right_w1']=-1.533213797491471
+        angles['right_w1']=-1.333213797491471
         angles['right_w2']=-3.17180584824316633
         limb.move_to_joint_positions(angles, timeout=5.0)
 
@@ -176,7 +176,8 @@ class VisualServoNode:
         """ State for attempting to open the fridge
         THE PLAN: ALIGN SELF WITH TAG THEN GO FORWARD"""
         if self.fridge_state == 0:
-            fridge_handle_R,self.fridge_handle_t=getTransform(self.listener,'base','ar_marker_0_ref')
+            fridge_handle_R,self.fridge_handle_t=getTransform(self.listener,'base','ar_marker_8')
+            self.fridge_handle_t += np.array([0,-.02,-.16])
             
         current_pose = self.limb_dict['right'].endpoint_pose()
         current_t = np.array([[ current_pose['position'].x, current_pose['position'].y, current_pose['position'].z]])
@@ -189,18 +190,20 @@ class VisualServoNode:
                 return
                 
             velocity = -np.multiply(current_t-self.fridge_handle_t, np.array([0, 1, 1]))
+            print velocity
             self._move_arm_towards('right', np.transpose(velocity))
             print "PANNING"
 
         ## GO FORWARD
         elif self.fridge_state == 1:    
             self.gripper_dict['right'].open()
-            if np.linalg.norm(np.multiply(current_t-self.fridge_handle_t, np.array([1, 2, 2]))) < .12:     
+            if np.linalg.norm(np.multiply(current_t-self.fridge_handle_t, np.array([1, 2, 2]))) < .125:     
                 self.fridge_state +=1
                 return
                 
             velocity = -np.multiply(current_t-self.fridge_handle_t, np.array([1, 2, 2]))
             self._move_arm_towards('right', np.transpose(velocity))
+            print np.linalg.norm(np.multiply(current_t-self.fridge_handle_t, np.array([1, 2, 2])))
             print "GOING FORWARD"
         
         ## GRAB HANDLE
@@ -236,7 +239,7 @@ class VisualServoNode:
         i = 0
         while not rospy.is_shutdown():
             i+=1
-            if i > 200:
+            if i > 600:
                 return
             self._open_fridge()
             r.sleep()
