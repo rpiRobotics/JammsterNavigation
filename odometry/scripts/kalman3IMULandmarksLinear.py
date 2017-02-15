@@ -184,9 +184,6 @@ class StatePredictionNode:
 
         self.i = 0 # print index
         self.j = 0 # move camera index
-
-        
-        self.last_time = []
         
         self.imus_observed_list = []
         self.ar_observed_list = []
@@ -233,9 +230,11 @@ class StatePredictionNode:
         rospy.Subscriber("right_voltage_pwm", Int16, self._rightMotorCallback)
         rospy.Subscriber("ar_pose_marker", AlvarMarkers, self._arCallback )
         rospy.Subscriber("scan", LaserScan, self._scanCallback )
+        
+        self.last_time = rospy.Time.now()
             
     def _scanCallback(self, data):
-        self.last_time = data.header.stamp            
+        return            
             
     def _leftMotorCallback(self, data):
         self.control_voltages[0] = data.data
@@ -284,8 +283,8 @@ class StatePredictionNode:
                 if np.linalg.norm(p_tr) > 2.5:
                     return
                 
-                t = self.listener.getLatestCommonTime(tag_frame+'_ref', 'world')
-                p_ot, q_ot = self.listener.lookupTransform('world', tag_frame+'_ref',  t)
+                t = self.listener.getLatestCommonTime(tag_frame+'_ref', 'odom')
+                p_ot, q_ot = self.listener.lookupTransform('odom', tag_frame+'_ref',  t)
                 H_ot = self.listener.fromTranslationRotation(p_ot, q_ot)
                 
                 H_ot = np.dot(H_ot, H_tr)    
@@ -397,27 +396,25 @@ class StatePredictionNode:
         self.sensed_ar_diff = {}
     
     def _publish_tf(self):
-        # ROBOT TRANSFORM
-        if self.last_time == []:
-            return
-        
+        # ROBOT TRANSFORM   
+        self.last_time = rospy.Time.now()
         state = copy.deepcopy(self.ekf.current_state_estimate)
-        self.br.sendTransform((state[4], state[5], 0),
-                 tf.transformations.quaternion_from_euler(0, 0, state[6]),
-                 self.last_time,
-                 "base_link",
-                 "odom")
-                 
-        self.br.sendTransform((0, 0, .1), tf.transformations.quaternion_from_euler(0, 0, 0),self.last_time,"/laser", "/base_link")                 
-        self.br.sendTransform((0, 0, 0), tf.transformations.quaternion_from_euler(0, 0, 0),self.last_time,"world", "odom")                 
-        self.br.sendTransform((0, 0, 0), tf.transformations.quaternion_from_euler(0, 0, 0),self.last_time,"base", "base_link")                 
         for landmark_id in self.landmark_map.keys():
             ar_obj = self.landmark_map[landmark_id]
             self.br.sendTransform((ar_obj.x, ar_obj.y, ar_obj.z),
-                 tf.transformations.quaternion_from_euler(ar_obj.theta_x, ar_obj.theta_y, ar_obj.theta_z),
-                 self.last_time,
-                 "ar_marker_" + str(ar_obj.tag_num) + "_ref",
+                 tf.transformations.quaternion_from_euler(ar_obj.theta_x, ar_obj.theta_y, ar_obj.theta_z),\
+                 self.last_time,\
+                 "ar_marker_" + str(ar_obj.tag_num) + "_ref",\
                  "odom")
+                 
+        self.br.sendTransform((state[4], state[5], 0),\
+                 tf.transformations.quaternion_from_euler(0, 0, state[6]),\
+                 self.last_time,\
+                 "base_link",\
+                 "odom")
+                 
+        self.br.sendTransform((0, 0, .1), tf.transformations.quaternion_from_euler(0, 0, 0),self.last_time,"laser", "base_link")         
+        self.br.sendTransform((0, 0, 0), tf.transformations.quaternion_from_euler(0, 0, 0),self.last_time,"base", "base_link")
         return
     
     def _update_ekf(self):
