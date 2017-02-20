@@ -1,0 +1,12 @@
+<!-- Entry point for using OpenNI devices -->
+<launch>
+  <node pkg="hokuyo_node" type="hokuyo_node" name="scan_publisher"/>
+
+  <node pkg="odometry" type="kalman3IMULandmarksLinear.py" name="odometryPublisher">
+    <remap from="/base_controller/odom" to="odom"/>
+  </node>
+
+  <node pkg="base_controller" type="base_controller_v2.py" name="base_controller">
+    <remap from="/base_command" to="cmd_vel"/>
+  </node>
+</launch>
