@@ -9,11 +9,24 @@ import numpy as np
 import rospy
 import baxter_interface
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import PoseWithCovariance
 from baxter_pykdl import baxter_kinematics
 import math
 import tf
 import copy
+
+from std_msgs.msg import Header
+from baxter_core_msgs.srv import (
+    SolvePositionIK,
+    SolvePositionIKRequest,
+)
+
+from geometry_msgs.msg import (
+    PoseStamped,
+    Pose,
+    Point,
+    Quaternion,
+    PoseWithCovariance,
+)
 
 # convert vector to cross product matrix form
 def hat(k):
@@ -21,59 +34,16 @@ def hat(k):
     return khat
 
 # returns jacobian relating angular velocity to quaternion velocity    
-def quatjacobian(q):
+def quatjacobian(quat):
     I = np.identity(3)
-    J = 0.5 * np.concatenate((q[1:4].T, q[0]*I - hat(q[1:4])), axis = 0)
+    J = 0.5 * np.concatenate((quat[1:4].T, quat[0]*I - hat(quat[1:4])), axis = 0)
     return J
     
-# convert 3 x 3 rotation matrix to quaternion
-def R2q(R):
-    tr = np.trace(R)
-    if tr > 0:
-        S = 2*math.sqrt(tr + 1)
-        q = np.array([[0.25*S], \
-                      [(R[2,1] - R[1,2]) / S], \
-                      [(R[0,2] - R[2,0]) / S], \
-                      [(R[1,0] - R[0,1]) / S]])
-                      
-    elif (R[0,0] > R[1,1] and R[0,0] > R[2,2]):
-        S = 2*math.sqrt(1 + R[0,0] - R[1,1] - R[2,2])
-        q = np.array([[(R[2,1] - R[1,2]) / S], \
-                      [0.25*S], \
-                      [(R[0,1] + R[1,0]) / S], \
-                      [(R[0,2] + R[2,0]) / S]])
-    elif (R[1,1] > R[2,2]):
-        S = 2*math.sqrt(1 - R[0,0] + R[1,1] - R[2,2])
-        q = np.array([[(R[0,2] - R[2,0]) / S], \
-                      [(R[0,1] + R[1,0]) / S], \
-                      [0.25*S], \
-                      [(R[1,2] + R[2,1]) / S]])
-    else:
-        S = 2*math.sqrt(1 - R[0,0] - R[1,1] + R[2,2])
-        q = np.array([[(R[1,0] - R[0,1]) / S], \
-                      [(R[0,2] + R[2,0]) / S], \
-                      [(R[1,2] + R[2,1]) / S], \
-                      [0.25*S]])
-    return q
-
-def getTransform(listener, frame1, frame2):
-    try:
-        position, quaternion= listener.lookupTransform(frame1, frame2, rospy.Time(0))
-        homogenousMatrix= listener.fromTranslationRotation(position, quaternion)
-        
-    except:
-        print "couldnt transform"
-        return (-1,-1)
-        
-    rotation = homogenousMatrix[0:3,0:3]
-    translation = homogenousMatrix[0:3,3]
-    return rotation, translation
 
 class VisualServoNode:
     """ Node responsible for driving the arm to tags for manipulation """
     def __init__(self):
         rospy.init_node('servo_node', anonymous=True)
-        rospy.Subscriber('/odometry', Odometry, self._odom_callback)
         self.listener= tf.TransformListener()
              
         self.robot_pose = PoseWithCovariance() # where we think our robot is
@@ -93,26 +63,7 @@ class VisualServoNode:
         #self.gripper_dict['left'] = baxter_interface.Gripper('left')
         #self.gripper_dict['left'].calibrate()
         
-#        Rtest,Ttest=getTransform(self.listener,'right_hand','base')
-#        print Rtest
-#        exit()
-        
-        self.t_desired_dict = {}    # WHERE WE WANT THE ARM TO GO
-        self.r_desired_dict = {}    # THE ORIENTATION OF THE ARM
-        
-        self.t_desired_dict['right']= np.array([[ 0.83728373, -0.39381423,  0.19123955]])
-        self.r_desired_dict['right'] = np.array([[ -5.40531349e-02,  -9.93651820e-01,   9.86626584e-02],\
-        [ -9.00945180e-04,  -9.87585367e-02, -9.95111019e-01],\
-        [  9.98537654e-01,  -5.38777598e-02,   4.44298269e-03]])
-        
-        self.t_desired_dict['left']= np.array([[ 0.83728373, -0.09381423,  0.19123955]])
-        self.r_desired_dict['left'] = np.array([[-0.0228398,  -0.16423468, -0.98615684],\
-        [ 0.0376087, 0.9855748,  -0.16500878], \
-        [ 0.9990315,  -0.04085684, -0.01633368]])
-        
-        ## CONTROL VARIABLES
-        self.fridge_state = 0
-        
+        ## MOVE ARM TO START
         limb = baxter_interface.Limb('right')
         angles = limb.joint_angles()
         
@@ -122,16 +73,60 @@ class VisualServoNode:
         angles['right_e1']=2.5648158773444116
         angles['right_w0']=-0.4306651061988299
         angles['right_w1']=-1.333213797491471
-        angles['right_w2']=-3.17180584824316633
-        limb.move_to_joint_positions(angles, timeout=5.0)
-
+        angles['right_w2']=-1.67180584824316633
+        limb.move_to_joint_positions(angles, timeout=10.0)
+        
+        pose = limb.endpoint_pose()
+        quat = pose['orientation']
+        
+        self.t_desired_dict = {}    # WHERE WE WANT THE ARM TO GO
+        self.r_desired_dict = {}    # THE ORIENTATION OF THE ARM
+    
+        self.t_desired_dict['right']= np.array([[ 0.83728373, -0.39381423,  0.19123955]])
+        self.r_desired_dict['right'] = [quat.w, quat.x, quat.y, quat.z]
+        
+        self.t_desired_dict['left']= np.array([[ 0.83728373, -0.09381423,  0.19123955]])
+        self.r_desired_dict['left'] = np.array([[-0.0228398,  -0.16423468, -0.98615684],\
+        [ 0.0376087, 0.9855748,  -0.16500878], \
+        [ 0.9990315,  -0.04085684, -0.01633368]])
+        
+        ## CONTROL VARIABLES
+        self.fridge_state = 0
+        
         # ENVIRONMENT INFO        
         self.fridge_handle_t = []
+              
+    def _ik_move(self, pose_desired, arm = 'right'):
+        """ Move robot arm to pose_desired (if possible) """
+        hdr = Header(stamp=rospy.Time.now(), frame_id='base')
         
-    def _odom_callback(self, data):
-        """ Update our position belief """
-        self.robot_pose = data.pose
-        return
+        pose_stamped = PoseStamped(
+            header=hdr,
+            pose=pose_desired,
+        )
+            
+        print "IK MOVING"
+        ns = "ExternalTools/" + arm + "/PositionKinematicsNode/IKService"
+        iksvc = rospy.ServiceProxy(ns, SolvePositionIK)
+        ikreq = SolvePositionIKRequest()
+        hdr = Header(stamp=rospy.Time.now(), frame_id='base')      
+        
+        ikreq.pose_stamp.append(pose_stamped)
+        
+        try:
+            rospy.wait_for_service(ns, 5.0)
+            resp = iksvc(ikreq)
+        except (rospy.ServiceException, rospy.ROSException), e:
+            rospy.logerr("Service call failed: %s" % (e,))
+            return 1
+            
+        if (resp.isValid[0]):
+            print("SUCCESS - Valid Joint Solution Found:")
+            # Format solution into Limb API-compatible dictionary
+            limb_joints = dict(zip(resp.joints[0].name, resp.joints[0].position))
+            self.limb_dict[arm].move_to_joint_positions(limb_joints)
+        else:
+            print("INVALID POSE - No Valid Joint Solution Found.")
         
     def _move_arm_towards(self, arm, velocity, orientation = None):
         """ Move the arm in the desired direction while maintaining orientation
@@ -139,18 +134,24 @@ class VisualServoNode:
         @orientation orientation in quaternion TODO
         @velocity *LINEAR" direction to travel in (numpy 3x1)"""
         
-        R,T=getTransform(self.listener,'base',arm+'_hand')
-        R_current,T_current=getTransform(self.listener,arm+'_hand','base')
+        if not orientation == None:
+            self.r_desired_dict[arm] = orientation
         
         maxJointVelocity = .2               
         J=self.kin_dict[arm].jacobian()
         
-        e = R2q(np.dot(np.transpose(self.r_desired_dict[arm]),R_current))
+        current_pose = self.limb_dict[arm].endpoint_pose()
+        quat = current_pose['orientation']
+        q_current = [quat.x, quat.y, quat.z, quat.w]
+
+        ## COMPUTE ROTATION VELOCITIES
+        e = tf.transformations.quaternion_multiply(self.r_desired_dict[arm], tf.transformations.quaternion_conjugate(q_current))
+        e = e.reshape([1,4])
+        Jq = quatjacobian(np.transpose(e))    
+        errorW=-10*np.dot(np.transpose(Jq),e.transpose())
+        print errorW
         
-        Jq = quatjacobian(e)
-       
-        errorW=np.dot(np.transpose(Jq),e)
-        
+        ## PERFORM TASK SPACE CONTROL
         desiredV = np.concatenate((velocity,errorW),axis = 0)
         jacobianInv=self.kin_dict[arm].jacobian_pseudo_inverse() 
         jointVelocities = np.dot(jacobianInv,desiredV)     
@@ -175,50 +176,89 @@ class VisualServoNode:
     def _open_fridge(self):
         """ State for attempting to open the fridge
         THE PLAN: ALIGN SELF WITH TAG THEN GO FORWARD"""
-        if self.fridge_state == 0:
-            fridge_handle_R,self.fridge_handle_t=getTransform(self.listener,'base','ar_marker_8')
-            self.fridge_handle_t += np.array([0,-.02,-.16])
-            
+ 
         current_pose = self.limb_dict['right'].endpoint_pose()
         current_t = np.array([[ current_pose['position'].x, current_pose['position'].y, current_pose['position'].z]])
         
+        ## USE IK TO POSITION IN FRONT OF TAG
+        if self.fridge_state == 0:
+            fridge_handle_t, fridge_handle_rq = self.listener.lookupTransform('base', 'ar_marker_0', rospy.Time(0))
+            self.fridge_handle_t = np.asarray(fridge_handle_t)
+            
+            euler = tf.transformations.euler_from_quaternion(fridge_handle_rq)
+            euler = list(euler)
+            euler[2] += math.pi
+            self.gripper_r = tf.transformations.quaternion_from_euler(euler[0], euler[1], euler[2])
+            
+            offset_ar = np.array([0,0,.3, 1]).reshape([4,1]) # offset in ar frame
+            H_ar_to_base = self.listener.asMatrix('base', Header(stamp=rospy.Time(0), frame_id='ar_marker_0'))
+            offset_base = np.dot(H_ar_to_base, offset_ar)
+            
+            desired_pose = Pose(
+                position=Point(
+                    x=offset_base[0],
+                    y=offset_base[1],
+                    z=offset_base[2],
+                ),
+                orientation=Quaternion(
+                    x=self.gripper_r[0],
+                    y=self.gripper_r[1],
+                    z=self.gripper_r[2],
+                    w=self.gripper_r[3],
+                )
+            )
+            try:
+                self._ik_move(desired_pose)
+                self.fridge_state+=1
+            except:
+                print "Unable to move"
+        
         ## ALIGN
         # SET Y AND Z POSITIONS APPROPRIATELY
-        if self.fridge_state == 0:
+        if self.fridge_state == 1:
+            fridge_handle_t, fridge_handle_rq = self.listener.lookupTransform('base', 'ar_marker_0', rospy.Time(0))
+            self.fridge_handle_t = np.asarray(fridge_handle_t)
+            self.fridge_handle_t += np.array([0,-.02,-.16])
+            
+            euler = tf.transformations.euler_from_quaternion(fridge_handle_rq)
+            euler = list(euler)
+            euler[2] += math.pi
+            self.fridge_handle_r = tf.transformations.quaternion_from_euler(euler[0], euler[1], euler[2])            
+            
             if np.linalg.norm(np.multiply(current_t-self.fridge_handle_t, np.array([0, 1, 1]))) < .1:
                 self.fridge_state +=1
                 return
                 
-            velocity = -np.multiply(current_t-self.fridge_handle_t, np.array([0, 1, 1]))
+            velocity = -np.multiply(current_t-self.fridge_handle_t, 5*np.array([0, 1, 1]))
             print velocity
-            self._move_arm_towards('right', np.transpose(velocity))
+            self._move_arm_towards('right', np.transpose(velocity), self.gripper_r)
             print "PANNING"
 
         ## GO FORWARD
-        elif self.fridge_state == 1:    
+        elif self.fridge_state == 2:    
             self.gripper_dict['right'].open()
             if np.linalg.norm(np.multiply(current_t-self.fridge_handle_t, np.array([1, 2, 2]))) < .125:     
                 self.fridge_state +=1
                 return
                 
-            velocity = -np.multiply(current_t-self.fridge_handle_t, np.array([1, 2, 2]))
+            velocity = -np.multiply(current_t-self.fridge_handle_t, 5*np.array([1, 2, 2]))
             self._move_arm_towards('right', np.transpose(velocity))
             print np.linalg.norm(np.multiply(current_t-self.fridge_handle_t, np.array([1, 2, 2])))
             print "GOING FORWARD"
         
         ## GRAB HANDLE
-        elif self.fridge_state == 2:
+        elif self.fridge_state == 3:
             self.gripper_dict['right'].close()
             self.fridge_state += 1
             print "GRABBING HANDLE"
             
-        elif self.fridge_state == 3:
+        elif self.fridge_state == 4:
             open_fridge_t = np.array([[ 0.7728373, -0.19381423,  0.19123955]])
             if np.linalg.norm(np.multiply(current_t-open_fridge_t, np.array([1, 2, 2]))) < .05:     
                 self.fridge_state +=1
                 return
                 
-            velocity = -np.multiply(current_t-open_fridge_t, np.array([1, 2, 2]))
+            velocity = -np.multiply(current_t-open_fridge_t, 5*np.array([1, 2, 2]))
             print np.linalg.norm(np.multiply(current_t-open_fridge_t, np.array([1, 2, 2])))
             self._move_arm_towards('right', np.transpose(velocity))
             print "OPENING"
