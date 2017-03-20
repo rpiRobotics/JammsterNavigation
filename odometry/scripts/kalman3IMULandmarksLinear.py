@@ -11,11 +11,24 @@ from tf import TransformListener
 from ar_track_alvar_msgs.msg import AlvarMarkers
 import transformations
 from sensor_msgs.msg import LaserScan
-import baxter_interface
+import time
 
 def deltaAngle(x, y):
     """ Return the smallest distance between two angles """
     return math.atan2(math.sin(x-y), math.cos(x-y))
+
+class MedianFilter():
+    """ Implementation of a simple median filter for outlier rejection """
+    def __init__(self, circular_buffer_size=10):
+        self.index = 0
+        self.data = [0] * circular_buffer_size
+        
+    def add_data(self, datum):
+        self.index = (self.index + 1)%len(self.data)
+        self.data[self.index] = datum
+        
+    def get_median(self):
+        return np.median(self.data)
 
 class ARTAG_landmark:
     """ Class used to represent an ARTAG landmark """
@@ -162,11 +175,16 @@ class StatePredictionNode:
     def __init__(self):
 
         rospy.init_node('odometry', anonymous=True)
-        self.dt = .017
+        self.dt = .02
         self.control_voltages = np.zeros([2,1])
-        self.vl = 0     # left wheel velocity
-        self.vr = 0     # right wheel velocity
-        self.vb = 0     # base angular velocity
+        
+        self.vl_filter = MedianFilter()
+        self.vr_filter = MedianFilter()
+        self.vb_filter = MedianFilter()
+        
+        self.vl = 0     # left wheel velocity (after filter)
+        self.vr = 0     # right wheel velocity (after filter)
+        self.vb = 0     # base angular velocity (after filter)        
 
         self.base_imu_ready = False # base imu is slower than the other IMU's
                                     # we can't update base velocity all the time
@@ -174,7 +192,7 @@ class StatePredictionNode:
         Q = np.zeros([7,7])
         Q[0,0] = 1*self.dt
         Q[1,1] = 1*self.dt
-        R = np.eye(3) * .001
+        R = np.eye(3) * .00001
         starting_state = np.zeros([7,1])
         self.r = .15
         self.l = .55
@@ -201,26 +219,14 @@ class StatePredictionNode:
         self.ekf.add_AR_tag(self.landmark_map[2], np.zeros([3,3]))
         self.ekf.add_AR_tag(self.landmark_map[3], np.zeros([3,3]))        
         self.br = tf.TransformBroadcaster()
-        
-        ## ARM CONTROL
-        self.l_limb = baxter_interface.Limb('left')
-        self.l_angle_default = {'left_w0': -0.1227184630308331, 'left_w1': 1.670888573204187,\
-        'left_w2': -0.1250194342126612, 'left_e0': 0.05368932757598948,\
-        'left_e1': 0.052155346788104066, 'left_s0': -0.7516505860638527,\
-        'left_s1': -1.0791554842773885}
-        
-        self.r_limb = baxter_interface.Limb('right')
-        self.r_angle_default ={'right_s0': 0.6845389265938658, 'right_s1': -1.1224904415351515,\
-        'right_w0': -0.22281070944035636, 'right_w1': -1.4864273834609658,\
-        'right_w2': 0.09510680884889565, 'right_e0': -0.28838838812245776,\
-        'right_e1': 2.5548450022231566}
-        
-        self.r_limb.move_to_joint_positions(self.r_angle_default)
-        self.l_limb.move_to_joint_positions(self.l_angle_default)
 
         ## FILE WRITING INFO
-        self.f = open('ar_data1.csv', 'w+')
+        self.f = open('ekf_data.csv', 'w+')
+        self.f.write('time, vl,vr,vx,vy,vtheta,x,y,theta,raw_vl,raw_vr\n')
+        self.t0 = time.time()
         self.transform_written = False
+        
+        self.write_imu_measurements = [0,0,0]
             
         self.pub = rospy.Publisher('odometry', Odometry, queue_size=1)
         rospy.Subscriber("/imu1", Imu, self._imu1Callback)
@@ -243,28 +249,36 @@ class StatePredictionNode:
         self.control_voltages[1] = data.data
         
     def _imu1Callback(self, data):
-        self.vl = -data.angular_velocity.x
-        if abs(self.vl) < .05:
-            self.vl = 0
-            return
-            
         self.imus_observed_list.append('imu1')
+        left_wheel_v = -data.angular_velocity.x
+        self.write_imu_measurements[0] = left_wheel_v
+        if abs(left_wheel_v) < .05:
+            self.vl_filter.add_data(0)
+            self.vl = self.vl_filter.get_median()
+            return
+        
+        self.vl_filter.add_data(left_wheel_v)
+        self.vl = self.vl_filter.get_median()
         
     def _imu2Callback(self, data):
-        self.vr = -data.angular_velocity.x
-        if abs(self.vr) < .05:
-            self.vr = 0       
-            return
-            
         self.imus_observed_list.append('imu2')
+        right_wheel_v = -data.angular_velocity.x
+        self.write_imu_measurements[1] = right_wheel_v
+        if abs(right_wheel_v) < .05:
+            self.vr_filter.add_data(0)
+            self.vr = self.vr_filter.get_median()
+            return
+        
+        self.vr_filter.add_data(right_wheel_v)
+        self.vr = self.vr_filter.get_median()
             
     def _imu3Callback(self, data):
+        self.imus_observed_list.append('imu3')
         self.vb = data.angular_velocity.z-.01
+        self.write_imu_measurements[2] = self.vb 
         if abs(self.vb) < .05:
             self.vb = 0   
             return
-            
-        self.imus_observed_list.append('imu3')
         
     def _arCallback(self, data):
         if abs(self.r_limb.joint_velocity('right_w0')) > .05:
@@ -334,21 +348,21 @@ class StatePredictionNode:
             H_row[0, 0] = 1
             H_list.append(H_row)
             measurement_list.append(self.vl)
-            R_list.append(.06)
+            R_list.append(.05)
             
         if 'imu2' in self.imus_observed_list:
             H_row = np.zeros([1, num_states])
             H_row[0, 1] = 1
             H_list.append(H_row)
             measurement_list.append(self.vr)
-            R_list.append(.06)
+            R_list.append(.05)
             
         if 'imu3' in self.imus_observed_list:
             H_row = np.zeros([1, num_states])
             H_row[0, 3] = 1
             H_list.append(H_row)
             measurement_list.append(self.vb)
-            R_list.append(4e-6)
+            R_list.append(4e-5)
     
         # BUILD H
         H = H_list[0]
@@ -372,6 +386,8 @@ class StatePredictionNode:
         # reset things
         self.imus_observed_list = []
         self.ekf.linear_measurement_update(measurements, H, R)
+        
+        # record imu measurements used to update kalman filter to write to a file
         
     def _update_with_landmarks(self):
         if len(self.ar_observed_list) == 0:
@@ -430,29 +446,9 @@ class StatePredictionNode:
             self.i = 0
             print self.ekf.current_state_estimate[4:7]
             
-    def _move_arm(self):
-        """ Position baxter camera to best find landmarks """
-        # IDENTIFY CLOSEST LANDMARK
-        min_dist = 9999
-        best_angle = 0
-        for landmark_id in self.landmark_map:    
-            if not landmark_id == 0:
-                continue
-
-            landmark = self.landmark_map[landmark_id]
-            dist = math.sqrt((-self.ekf.current_state_estimate[4] + landmark.x)**2 + (-self.ekf.current_state_estimate[5] - landmark.y)**2)
-            angle =deltaAngle(self.ekf.current_state_estimate[6], math.atan2(-self.ekf.current_state_estimate[5] + landmark.y, -self.ekf.current_state_estimate[4]))
-            if dist < min_dist and abs(angle) < math.pi/2+.5:
-                min_dist = dist
-                best_angle = angle
-
-        self.j+=1
-        if self.j%10 ==0:
-            self.j = 0                
-
-            baxter_angles = self.r_angle_default
-            baxter_angles['right_w0'] = best_angle
-            #self.r_limb.set_joint_positions(baxter_angles)
+    def _write_to_file(self):
+        state = copy.deepcopy(self.ekf.current_state_estimate)
+        self.f.write(str(time.time() - self.t0) + ',' + str(state[0,0]) + ',' + str(state[1,0]) + ','+  str(state[2,0]) +  ',' + str(state[3,0]) +  ',' + str(state[4,0]) + ',' + str(state[5,0]) + ',' + str(state[6,0]) + ',' + str(state[7,0]) + ',' + str(self.write_imu_measurements[0]) + ',' +  str(self.write_imu_measurements[1]) + ',' + str(self.write_imu_measurements[2])  +  '\n') 
         
     def spin(self):
         r = rospy.Rate(1/self.dt)
@@ -461,6 +457,10 @@ class StatePredictionNode:
             self._update_ekf()
             self._print()
             self._publish_odom()
+            self._write_to_file()
+            
+            self.control_voltages[0] = 0
+            self.control_voltages[1] = 0
             r.sleep()
 
 my_node = StatePredictionNode()
