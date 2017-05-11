@@ -13,12 +13,15 @@ from baxter_pykdl import baxter_kinematics
 import math
 import tf
 import copy
+import time
 
 from std_msgs.msg import Header
 from baxter_core_msgs.srv import (
     SolvePositionIK,
     SolvePositionIKRequest,
 )
+
+import std_msgs.msg
 
 from geometry_msgs.msg import (
     PoseStamped,
@@ -45,6 +48,7 @@ class VisualServoNode:
     def __init__(self):
         rospy.init_node('servo_node', anonymous=True)
         self.listener= tf.TransformListener()
+        rospy.Subscriber("manipulation_state", std_msgs.msg.String, self._get_command)
              
         self.robot_pose = PoseWithCovariance() # where we think our robot is
         
@@ -95,6 +99,12 @@ class VisualServoNode:
         
         # ENVIRONMENT INFO        
         self.fridge_handle_t = []
+
+
+    def _get_command(self, data):
+        if self.fridge_state < 0:
+            time.sleep(2)        
+            self.fridge_state = 0
               
     def _ik_move(self, pose_desired, arm = 'right'):
         """ Move robot arm to pose_desired (if possible) """
@@ -176,6 +186,9 @@ class VisualServoNode:
     def _open_fridge(self):
         """ State for attempting to open the fridge
         THE PLAN: ALIGN SELF WITH TAG THEN GO FORWARD"""
+
+        if self.fridge_state < 0:
+            return
  
         current_pose = self.limb_dict['right'].endpoint_pose()
         current_t = np.array([[ current_pose['position'].x, current_pose['position'].y, current_pose['position'].z]])
@@ -190,7 +203,7 @@ class VisualServoNode:
             euler[2] += math.pi
             self.gripper_r = tf.transformations.quaternion_from_euler(euler[0], euler[1], euler[2])
             
-            offset_ar = np.array([0,0,.3, 1]).reshape([4,1]) # offset in ar frame
+            offset_ar = np.array([.1,-.1,.15, 1]).reshape([4,1]) # offset in ar frame
             H_ar_to_base = self.listener.asMatrix('base', Header(stamp=rospy.Time(0), frame_id='ar_marker_0'))
             offset_base = np.dot(H_ar_to_base, offset_ar)
             
@@ -218,7 +231,7 @@ class VisualServoNode:
         if self.fridge_state == 1:
             fridge_handle_t, fridge_handle_rq = self.listener.lookupTransform('base', 'ar_marker_0', rospy.Time(0))
             self.fridge_handle_t = np.asarray(fridge_handle_t)
-            self.fridge_handle_t += np.array([0,-.02,-.16])
+            self.fridge_handle_t += np.array([0,-.1,-.19])
             
             euler = tf.transformations.euler_from_quaternion(fridge_handle_rq)
             euler = list(euler)
@@ -279,7 +292,7 @@ class VisualServoNode:
         i = 0
         while not rospy.is_shutdown():
             i+=1
-            if i > 600:
+            if i > 6000:
                 return
             self._open_fridge()
             r.sleep()

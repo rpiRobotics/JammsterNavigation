@@ -139,7 +139,7 @@ class BaseController:
         print "****NEW COMMAND RECEIVED***"
         linearV=data.linear.x
         angularV=data.angular.z
-        # calculate desired velocities for wheels see Georgia Tech mobile robot 2.2 video for equation
+
         L=.5
         R=.15
         self.leftPID.setPoint( (2*linearV - angularV*L)/(2*R))
@@ -173,7 +173,7 @@ class BaseController:
         # run loop 20 times a second
         newLeft = 0
         newRight = 0
-        r = rospy.Rate(50)
+        r = rospy.Rate(20)
         while not rospy.is_shutdown():
             # Wait until we get new data from both motors
             if self.newDataM1 and self.newDataM2:
@@ -201,7 +201,7 @@ class BaseController:
                     self.repeatCount = 0
                 
                 # If we have too many repeats, shut the system down
-                if self.repeatCount > 60:
+                if self.repeatCount > 6000:
                     print "Too many repeats!"
                     self.shutdown()
                     

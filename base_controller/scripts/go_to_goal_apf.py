@@ -10,7 +10,7 @@ Created on Tue Jan 17 18:55:13 2017
 import math
 import rospy
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import LaserScan
 import tf
@@ -25,12 +25,12 @@ class GoToGoal:
     def __init__(self):
         rospy.init_node('go_to_goal', anonymous=True)        
         rospy.Subscriber("/odometry", Odometry , self._odomCallback)
-        rospy.Subscriber("/goal", Pose, self._goalCallback)
+        rospy.Subscriber("/goal", PoseStamped, self._goalCallback)
         rospy.Subscriber("/scan", LaserScan, self._scanCallback)
         self.pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
         
-        self.obstacle_register_dist = .3# distance at which obstacles are recognized
-        self.obstacle_stop_dist = .1    # distance at which a hard stop is engaged
+        self.obstacle_register_dist = .6 # distance at which obstacles are recognized
+        self.obstacle_stop_dist = .6    # distance at which a hard stop is engaged
         
         self.w_pid = PID(P=2.0, I=0.0, D=0.0, Derivator=0, Integrator=0, Integrator_max=2, Integrator_min=-2)
 
@@ -54,8 +54,9 @@ class GoToGoal:
         self.close_enough = False  # CLOSE ENOUGH TO TARGET, TURN IN PLACE
         self.stop = False          # STOP IF OBSTACLE
 
-    def _goalCallback(self, data):
+    def _goalCallback(self, raw_data):
         print "Got new goal"
+        data = raw_data.pose
         self.desired_x = data.position.x
         self.desired_y = data.position.y
         quat = (data.orientation.x, data.orientation.y, data.orientation.z, data.orientation.w)
@@ -70,7 +71,7 @@ class GoToGoal:
         self.current_x = data.pose.pose.position.x
         self.current_y = data.pose.pose.position.y
 
-        if math.sqrt((self.current_x - self.desired_x)**2 + (self.current_y - self.desired_y)**2) > .3:
+        if math.sqrt((self.current_x - self.desired_x)**2 + (self.current_y - self.desired_y)**2) > .15:
             self.close_enough = False
         else:
             self.close_enough = True            
@@ -116,6 +117,7 @@ class GoToGoal:
         ## ADD REPULSIVE FORCE
         r_force = np.zeros([2,1])
         if len(self.repulsive_point_list) > 0:
+            print len(self.repulsive_point_list)
             for r_point in self.repulsive_point_list:
                 r_force[0] -= (r_point[0]- self.current_x)/math.sqrt((r_point[0]- self.current_x)**2 + (r_point[1]- self.current_y)**2)**2
                 r_force[1] -= (r_point[1]- self.current_y)/math.sqrt((r_point[0]- self.current_x)**2 + (r_point[1]- self.current_y)**2)**2
@@ -135,29 +137,57 @@ class GoToGoal:
         self.w_pid.setPoint(act_bearing)
         ## STATE MACHINE
         print len(self.repulsive_point_list)
-        # STOP
-        if self.stop:
+        self.v = 0
+        self.w = 0
+        ## STOP
+        if self.stop or (self.desired_x == 0 and self.desired_y ==0):
             print "STOPPING"
             self.v = 0
             self.w = 0
         
+
+        ## TURN IN PLACE
+        elif self.close_enough and abs(deltaAngle(self.current_bearing, self.desired_bearing)) > .15:
+            print "CLOSE ENOUGH, TURNING IN PLACE"
+            self.w_pid.setPoint(self.desired_bearing)
+            self.w = self.w_pid.update(self.current_bearing)
+            self.v = 0
+
+
+        ## MOVE TO GOAL
         # TURN ONLY
-        elif abs(deltaAngle(self.current_bearing, act_bearing)) > 1.6 or self.close_enough:
+        elif abs(deltaAngle(self.current_bearing, act_bearing)) > .6 and not self.close_enough:
             print "TURNING ONLY"
             self.v = 0
             self.w = self.w_pid.update(self.current_bearing)
             
         # TURN AND GO FORWARD
-        elif abs(deltaAngle(self.current_bearing, act_bearing)) < 1.6 and abs(deltaAngle(self.current_bearing, act_bearing)) > .5:
+        elif abs(deltaAngle(self.current_bearing, act_bearing)) < .6 and abs(deltaAngle(self.current_bearing, act_bearing)) > .2 and not self.close_enough:
             print "TURNING AND GOING FORWARD"
             self.v = .2
             self.w = self.w_pid.update(self.current_bearing)
             
-        else:
+        elif not self.close_enough:
             print "GOING FORWARD ONLY"
             self.v = .2
             self.w = 0
         
+
+        if self.v > self.v_max:
+            self.v = self.v_max
+        if self.v < -self.v_max:
+            self.v = -self.v_max
+
+        if self.w > self.w_max:
+            self.w = self.w_max
+        if self.w < -self.w_max:
+           self.w = -self.w_max
+
+        msg = Twist()
+        msg.linear.x = self.v
+        msg.angular.z = self.w
+        self.pub.publish(msg)
+
         return
 
     def spin(self):

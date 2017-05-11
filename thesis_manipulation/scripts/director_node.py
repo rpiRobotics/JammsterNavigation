@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python
 """
 Created on Wed Feb 22 09:38:41 2017
 
@@ -24,9 +24,11 @@ class DirectorNode:
         rospy.Subscriber('move_base/status', GoalStatusArray, self._action_server_callback)
         
         self.at_goal = False
+        self.sent_command = False
         
     def send_fridge_goal(self):
         """ Send move_base a pose goal to go to the fridge using action server """
+        print "SENDING GOAL"
         goal_action = MoveBaseActionGoal()
         goal = PoseStamped()
         header = std_msgs.msg.Header()
@@ -36,23 +38,30 @@ class DirectorNode:
         
         goal.pose = Pose(
             position=Point(
-                x=100.236801147,
-                y=99.8681869507,
+                x=100.136801147,
+                y=100.06081869507,
                 z=0.0
             ),
             orientation=Quaternion(
                 x=0.0,
                 y=0.0,
-                z=-0.491244894362,
-                w=0.871021500173
+                z=-0.523665174293,
+                w=0.851924166363
             )
         )
+        header.frame_id = 'map'
         goal_action.header = header
         goal_action.goal.target_pose = goal
         self.base_goal_pub.publish(goal_action)
         
     def _action_server_callback(self, data):
-        if GoalStatusArray.status_list[0] > 1:
+        if len(data.status_list) == 0:
+            return
+        else:
+            print "COMMAND SENT"
+            self.sent_command = True
+
+        if data.status_list[-1] > 1:
             self.at_goal = True
             
     def open_fridge_command(self):
@@ -60,13 +69,20 @@ class DirectorNode:
         self.manipulation_pub.publish(command)
             
     def spin(self):
-        self.send_fridge_goal()
-        r = rospy.Rate(10)
+        r = rospy.Rate(5)
+        sent = False
         while not rospy.is_shutdown():
-            r.sleep()
-            print 'Waiting for goal'
+            
+
             if self.at_goal:
+                print "YAY"
                 self.open_fridge_command()
+            if not self.sent_command:
+                self.send_fridge_goal()
+
+
+            r.sleep()
+
             
 my_node = DirectorNode()
 my_node.spin()

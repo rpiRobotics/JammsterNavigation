@@ -2,7 +2,7 @@
   <master auto="start"/>
 
   <!-- Run the map server -->
-  <node name="map_server" pkg="map_server" type="map_server" args="$(find jammster_2dnav)/config/corridor_map.pgm 0.050"/>
+  <node name="map_server" pkg="map_server" type="map_server" args="$(find jammster_2dnav)/config/office_map2.pgm 0.050"/>
 
   <!--- Run AMCL -->
   <include file="$(find amcl)/examples/amcl_diff.launch" />

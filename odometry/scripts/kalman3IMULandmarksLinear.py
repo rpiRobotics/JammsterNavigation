@@ -19,7 +19,7 @@ def deltaAngle(x, y):
 
 class MedianFilter():
     """ Implementation of a simple median filter for outlier rejection """
-    def __init__(self, circular_buffer_size=10):
+    def __init__(self, circular_buffer_size=7):
         self.index = 0
         self.data = [0] * circular_buffer_size
         
@@ -91,14 +91,14 @@ class ExtendedWMRKalmanFilter:
         vr = u[1,0]
         
         # Vary noise with input voltage
-        if vl == 0 and abs(self.current_state_estimate[0,0]) < .03:
+        if abs(self.current_state_estimate[0,0]) < .03:
             self.Q[0,0] = .0000001
             dtheta_l = 0
 
         else:
             self.Q[0,0] = abs(vl)*.03/3000+.03
 
-        if vr == 0 and abs(self.current_state_estimate[1,0]) < .03:
+        if abs(self.current_state_estimate[1,0]) < .03:
             self.Q[1,1] = .0000001
             dtheta_r = 0
         else:
@@ -211,9 +211,9 @@ class StatePredictionNode:
         ## ADD PREDEFINED MAPS
         #(tag_num, slam_id, x, y, z, theta_x, theta_y, theta_z, fixed = True)
         self.landmark_map[0] = ARTAG_landmark(0,1,0,1.37,.10,math.pi/2, 0, 0)
-        self.landmark_map[1] = ARTAG_landmark(1,2,-1.74,0,.15,math.pi/2, 0, math.pi/2)
-        self.landmark_map[3] = ARTAG_landmark(3,3,2.84,.15,.32,math.pi/2, 0, -math.pi/2)
-        self.landmark_map[2] = ARTAG_landmark(2,4,1.37,1.88,.06,math.pi/2, 0, 0)
+        self.landmark_map[1] = ARTAG_landmark(13,2,-1.74,0,.15,math.pi/2, 0, math.pi/2)
+        self.landmark_map[3] = ARTAG_landmark(5,3,2.84,.15,.32,math.pi/2, 0, -math.pi/2)
+        self.landmark_map[2] = ARTAG_landmark(9,4,1.37,1.88,.06,math.pi/2, 0, 0)
         self.ekf.add_AR_tag(self.landmark_map[0], np.zeros([3,3]))
         self.ekf.add_AR_tag(self.landmark_map[1], np.zeros([3,3]))
         self.ekf.add_AR_tag(self.landmark_map[2], np.zeros([3,3]))
@@ -281,10 +281,6 @@ class StatePredictionNode:
             return
         
     def _arCallback(self, data):
-        if abs(self.r_limb.joint_velocity('right_w0')) > .05:
-            print "WRIST MOVING TOO FAST"
-            return 
-
         for marker in data.markers:
             if marker.id in self.landmark_map:
                 
